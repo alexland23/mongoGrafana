@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "MongoDB",
+  "id": "alandave-mongodb-datasource",
+  "metrics": true,
+  "logs": true,
+  "annotations": true,
+  "alerting": true,
+  "backend": true,
+  "executable": "gpx_mongo_db",
+  "info": {
+    "description": "Query and visualize MongoDB data with aggregation pipelines, find, count, distinct and raw commands",
+    "author": {
+      "name": "Alandave"
+    },
+    "keywords": ["datasource"],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=12.3.0",
+    "plugins": []
+  }
+}

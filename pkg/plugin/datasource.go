@@ -1,0 +1,298 @@
+package plugin
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/alandave/mongo-db/pkg/models"
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+)
+
+var (
+	_ backend.QueryDataHandler      = (*Datasource)(nil)
+	_ backend.CheckHealthHandler    = (*Datasource)(nil)
+	_ instancemgmt.InstanceDisposer = (*Datasource)(nil)
+)
+
+// NewDatasource creates a new datasource instance. One mongo.Client is shared
+// by all queries of a datasource instance; the SDK disposes and recreates the
+// instance whenever its settings change.
+func NewDatasource(_ context.Context, settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
+	config, err := models.LoadPluginSettings(settings)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := options.Client().ApplyURI(config.ConnectionString)
+	if config.Username != "" {
+		cred := options.Credential{
+			Username:    config.Username,
+			Password:    config.Secrets.Password,
+			PasswordSet: true,
+		}
+		opts.SetAuth(cred)
+	}
+	if opts.ConnectTimeout == nil {
+		opts.SetConnectTimeout(10 * time.Second)
+	}
+
+	client, err := mongo.Connect(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MongoDB client: %w", err)
+	}
+
+	return &Datasource{client: client, settings: config}, nil
+}
+
+// Datasource is a MongoDB datasource instance.
+type Datasource struct {
+	client   *mongo.Client
+	settings *models.PluginSettings
+}
+
+// Dispose cleans up the client when the instance is replaced.
+func (d *Datasource) Dispose() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = d.client.Disconnect(ctx)
+}
+
+// QueryData handles multiple queries and returns multiple responses.
+func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
+	response := backend.NewQueryDataResponse()
+
+	for _, q := range req.Queries {
+		response.Responses[q.RefID] = d.query(ctx, q)
+	}
+
+	return response, nil
+}
+
+func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend.DataResponse {
+	var qm queryModel
+	if err := json.Unmarshal(query.JSON, &qm); err != nil {
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err))
+	}
+
+	dbName := qm.Database
+	if dbName == "" {
+		dbName = d.settings.Database
+	}
+	if dbName == "" {
+		return backend.ErrDataResponse(backend.StatusBadRequest, "no database configured: set one on the datasource or the query")
+	}
+
+	queryType := qm.QueryType
+	if queryType == "" {
+		queryType = "aggregate"
+	}
+	if qm.Collection == "" && queryType != "command" {
+		return backend.ErrDataResponse(backend.StatusBadRequest, "collection is required")
+	}
+
+	timeout := time.Duration(d.settings.TimeoutSeconds) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	db := d.client.Database(dbName)
+	coll := db.Collection(qm.Collection)
+	text := interpolateMacros(qm.QueryText, query)
+
+	var (
+		docs []bson.D
+		err  error
+	)
+	switch queryType {
+	case "aggregate":
+		docs, err = runAggregate(ctx, coll, text)
+	case "find":
+		docs, err = runFind(ctx, coll, text, qm)
+	case "count":
+		docs, err = runCount(ctx, coll, text)
+	case "distinct":
+		docs, err = runDistinct(ctx, coll, text, qm.Field)
+	case "command":
+		docs, err = runCommand(ctx, db, text)
+	default:
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("unknown query type %q", queryType))
+	}
+	if err != nil {
+		status := backend.StatusBadRequest
+		if !strings.Contains(err.Error(), "invalid") {
+			status = backend.StatusInternal
+		}
+		return backend.ErrDataResponse(status, fmt.Sprintf("%s query failed: %v", queryType, err))
+	}
+
+	frame := docsToFrame(docs, query.RefID, qm.Format)
+
+	var response backend.DataResponse
+	response.Frames = append(response.Frames, frame)
+	return response
+}
+
+func runAggregate(ctx context.Context, coll *mongo.Collection, text string) ([]bson.D, error) {
+	pipeline, err := parsePipeline(text)
+	if err != nil {
+		return nil, err
+	}
+	cursor, err := coll.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var docs []bson.D
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
+
+func runFind(ctx context.Context, coll *mongo.Collection, text string, qm queryModel) ([]bson.D, error) {
+	filter, err := parseDocument(text)
+	if err != nil {
+		return nil, fmt.Errorf("filter: %w", err)
+	}
+	opts := options.Find()
+	if qm.Projection != "" {
+		projection, err := parseDocument(qm.Projection)
+		if err != nil {
+			return nil, fmt.Errorf("projection: %w", err)
+		}
+		opts.SetProjection(projection)
+	}
+	if qm.Sort != "" {
+		sortDoc, err := parseDocument(qm.Sort)
+		if err != nil {
+			return nil, fmt.Errorf("sort: %w", err)
+		}
+		opts.SetSort(sortDoc)
+	}
+	if qm.Limit > 0 {
+		opts.SetLimit(qm.Limit)
+	}
+	if qm.Skip > 0 {
+		opts.SetSkip(qm.Skip)
+	}
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	var docs []bson.D
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
+
+func runCount(ctx context.Context, coll *mongo.Collection, text string) ([]bson.D, error) {
+	filter, err := parseDocument(text)
+	if err != nil {
+		return nil, err
+	}
+	count, err := coll.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return []bson.D{{{Key: "count", Value: count}}}, nil
+}
+
+func runDistinct(ctx context.Context, coll *mongo.Collection, text, field string) ([]bson.D, error) {
+	if field == "" {
+		return nil, fmt.Errorf("invalid distinct query: field is required")
+	}
+	filter, err := parseDocument(text)
+	if err != nil {
+		return nil, err
+	}
+	var values bson.A
+	if err := coll.Distinct(ctx, field, filter).Decode(&values); err != nil {
+		return nil, err
+	}
+	docs := make([]bson.D, 0, len(values))
+	for _, v := range values {
+		docs = append(docs, bson.D{{Key: field, Value: v}})
+	}
+	return docs, nil
+}
+
+func runCommand(ctx context.Context, db *mongo.Database, text string) ([]bson.D, error) {
+	cmd, err := parseDocument(text)
+	if err != nil {
+		return nil, err
+	}
+	if len(cmd) == 0 {
+		return nil, fmt.Errorf("invalid command: document is empty")
+	}
+	var result bson.D
+	if err := db.RunCommand(ctx, cmd).Decode(&result); err != nil {
+		return nil, err
+	}
+	// Commands that return cursors (e.g. manually issued find/aggregate)
+	// carry their rows in cursor.firstBatch; surface those rows directly.
+	if batch, ok := extractFirstBatch(result); ok {
+		return batch, nil
+	}
+	return []bson.D{result}, nil
+}
+
+func extractFirstBatch(result bson.D) ([]bson.D, bool) {
+	for _, e := range result {
+		if e.Key != "cursor" {
+			continue
+		}
+		cursorDoc, ok := e.Value.(bson.D)
+		if !ok {
+			return nil, false
+		}
+		for _, ce := range cursorDoc {
+			if ce.Key != "firstBatch" {
+				continue
+			}
+			arr, ok := ce.Value.(bson.A)
+			if !ok {
+				return nil, false
+			}
+			docs := make([]bson.D, 0, len(arr))
+			for _, item := range arr {
+				if doc, ok := item.(bson.D); ok {
+					docs = append(docs, doc)
+				}
+			}
+			return docs, true
+		}
+	}
+	return nil, false
+}
+
+// CheckHealth pings the server so the "Save & test" button verifies both
+// connectivity and credentials.
+func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
+	res := &backend.CheckHealthResult{}
+	_, err := models.LoadPluginSettings(*req.PluginContext.DataSourceInstanceSettings)
+	if err != nil {
+		res.Status = backend.HealthStatusError
+		res.Message = err.Error()
+		return res, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := d.client.Ping(ctx, readpref.Primary()); err != nil {
+		res.Status = backend.HealthStatusError
+		res.Message = fmt.Sprintf("could not connect to MongoDB: %v", err)
+		return res, nil
+	}
+
+	return &backend.CheckHealthResult{
+		Status:  backend.HealthStatusOk,
+		Message: "Successfully connected to MongoDB",
+	}, nil
+}
