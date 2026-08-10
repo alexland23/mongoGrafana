@@ -32,10 +32,11 @@ func newFrameBuilder() *frameBuilder {
 
 // addDocument flattens one document into the builder as a new row.
 func (b *frameBuilder) addDocument(doc bson.D) {
-	flat := map[string]any{}
-	flattenDoc("", doc, flat)
+	flat := make([]bson.E, 0, len(doc))
+	flattenDoc("", doc, &flat, map[string]int{})
 
-	for name, raw := range flat {
+	for _, e := range flat {
+		name, raw := e.Key, e.Value
 		kind, val := normalizeValue(raw)
 		if val == nil && kind == data.FieldTypeUnknown {
 			kind = data.FieldTypeNullableString
@@ -95,19 +96,28 @@ func stringify(val any, kind data.FieldType) any {
 	return &s
 }
 
-// flattenDoc flattens nested documents using dot notation. Arrays and other
-// non-scalar leaves are kept whole and later JSON-encoded.
-func flattenDoc(prefix string, doc bson.D, out map[string]any) {
+// flattenDoc flattens nested documents using dot notation, preserving field
+// order so column order stays stable across queries (map iteration order in
+// Go is randomized, so an intermediate map would reshuffle columns on every
+// run). Arrays and other non-scalar leaves are kept whole and later
+// JSON-encoded. seen tracks each key's index in out so a repeated key
+// overwrites in place rather than duplicating.
+func flattenDoc(prefix string, doc bson.D, out *[]bson.E, seen map[string]int) {
 	for _, e := range doc {
 		key := e.Key
 		if prefix != "" {
 			key = prefix + "." + key
 		}
 		if sub, ok := e.Value.(bson.D); ok {
-			flattenDoc(key, sub, out)
+			flattenDoc(key, sub, out, seen)
 			continue
 		}
-		out[key] = e.Value
+		if idx, ok := seen[key]; ok {
+			(*out)[idx] = bson.E{Key: key, Value: e.Value}
+			continue
+		}
+		seen[key] = len(*out)
+		*out = append(*out, bson.E{Key: key, Value: e.Value})
 	}
 }
 
