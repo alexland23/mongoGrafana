@@ -48,6 +48,22 @@ export interface MongoDataSourceOptions extends DataSourceJsonData {
   username?: string;
   /** Per-query timeout in seconds */
   timeoutSeconds?: number;
+  /** Enable TLS for the connection, independent of any "tls" URI parameter */
+  tlsEnabled?: boolean;
+  /** Skip server certificate verification. Insecure; for self-signed certs in dev/test. */
+  tlsSkipVerify?: boolean;
+  /** Path to a PEM CA certificate file on the plugin backend host. Takes precedence over tlsCaCert. */
+  tlsCaCertPath?: string;
+  /** Path to a PEM client certificate file on the plugin backend host. Takes precedence over tlsClientCert. */
+  tlsClientCertPath?: string;
+  /** Path to a PEM client key file on the plugin backend host. Takes precedence over tlsClientKey. */
+  tlsClientKeyPath?: string;
+  /** primary | primaryPreferred | secondary | secondaryPreferred | nearest */
+  readPreference?: string;
+  /** Timeout for establishing the initial server connection, in seconds */
+  connectTimeoutSeconds?: number;
+  /** Maximum pooled connections per server */
+  maxPoolSize?: number;
 }
 
 /**
@@ -55,4 +71,10 @@ export interface MongoDataSourceOptions extends DataSourceJsonData {
  */
 export interface MongoSecureJsonData {
   password?: string;
+  /** PEM-encoded CA certificate used to verify the server */
+  tlsCaCert?: string;
+  /** PEM-encoded client certificate for mutual TLS */
+  tlsClientCert?: string;
+  /** PEM-encoded client private key for mutual TLS */
+  tlsClientKey?: string;
 }

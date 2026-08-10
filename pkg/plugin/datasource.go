@@ -2,8 +2,11 @@ package plugin
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -40,8 +43,23 @@ func NewDatasource(_ context.Context, settings backend.DataSourceInstanceSetting
 		}
 		opts.SetAuth(cred)
 	}
-	if opts.ConnectTimeout == nil {
-		opts.SetConnectTimeout(10 * time.Second)
+	opts.SetConnectTimeout(time.Duration(config.ConnectTimeoutSeconds) * time.Second)
+	if config.MaxPoolSize > 0 {
+		opts.SetMaxPoolSize(config.MaxPoolSize)
+	}
+	if config.ReadPreference != "" {
+		rp, err := readPreferenceFromString(config.ReadPreference)
+		if err != nil {
+			return nil, err
+		}
+		opts.SetReadPreference(rp)
+	}
+	if config.TLSEnabled {
+		tlsConfig, err := buildTLSConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build TLS config: %w", err)
+		}
+		opts.SetTLSConfig(tlsConfig)
 	}
 
 	client, err := mongo.Connect(opts)
@@ -50,6 +68,72 @@ func NewDatasource(_ context.Context, settings backend.DataSourceInstanceSetting
 	}
 
 	return &Datasource{client: client, settings: config}, nil
+}
+
+func readPreferenceFromString(mode string) (*readpref.ReadPref, error) {
+	switch mode {
+	case "primary":
+		return readpref.Primary(), nil
+	case "primaryPreferred":
+		return readpref.PrimaryPreferred(), nil
+	case "secondary":
+		return readpref.Secondary(), nil
+	case "secondaryPreferred":
+		return readpref.SecondaryPreferred(), nil
+	case "nearest":
+		return readpref.Nearest(), nil
+	default:
+		return nil, fmt.Errorf("unknown read preference %q", mode)
+	}
+}
+
+func buildTLSConfig(config *models.PluginSettings) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: config.TLSSkipVerify, //nolint:gosec // user-controlled opt-in for self-signed/dev deployments
+	}
+
+	caCert, err := loadPEMSource(config.TLSCACertPath, config.Secrets.TLSCACert)
+	if err != nil {
+		return nil, fmt.Errorf("CA certificate: %w", err)
+	}
+	if len(caCert) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("could not parse CA certificate")
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	clientCert, err := loadPEMSource(config.TLSClientCertPath, config.Secrets.TLSClientCert)
+	if err != nil {
+		return nil, fmt.Errorf("client certificate: %w", err)
+	}
+	clientKey, err := loadPEMSource(config.TLSClientKeyPath, config.Secrets.TLSClientKey)
+	if err != nil {
+		return nil, fmt.Errorf("client key: %w", err)
+	}
+	if len(clientCert) > 0 || len(clientKey) > 0 {
+		cert, err := tls.X509KeyPair(clientCert, clientKey)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse client certificate/key: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
+	return tlsConfig, nil
+}
+
+// loadPEMSource reads PEM content from path when set, otherwise falls back
+// to the given inline content (e.g. pasted into the config UI).
+func loadPEMSource(path, content string) ([]byte, error) {
+	if path == "" {
+		return []byte(content), nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read %q: %w", path, err)
+	}
+	return data, nil
 }
 
 // Datasource is a MongoDB datasource instance.
