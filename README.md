@@ -1,5 +1,7 @@
 # MongoDB data source plugin for Grafana
 
+> **Note:** This is an unofficial, community-built plugin. It is not developed, maintained, or endorsed by MongoDB, Inc. or Grafana Labs.
+
 A Grafana data source plugin (plugin ID `alandave-mongodb-datasource`) for querying and visualizing MongoDB data. It has a Go backend built on the official MongoDB driver (v2) and a React frontend with a Monaco JSON query editor.
 
 User-facing documentation (configuration, query types, macros, formats, variables) lives in [src/README.md](./src/README.md), which is what ships with the plugin.

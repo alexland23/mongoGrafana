@@ -1,5 +1,7 @@
 # MongoDB data source for Grafana
 
+> **Note:** This is an unofficial, community-built plugin. It is not developed, maintained, or endorsed by MongoDB, Inc. or Grafana Labs.
+
 Query and visualize MongoDB data in Grafana. Write aggregation pipelines, find filters, counts, distinct-value queries or raw database commands in MongoDB extended JSON, and render the results as tables, time series or logs.
 
 ## Configuration
