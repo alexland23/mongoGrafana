@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: 'MongoDB (schema discovery)'
+    type: 'alandave-mongodb-datasource'
+    access: proxy
+    isDefault: false
+    orgId: 1
+    version: 1
+    editable: true
+    jsonData:
+      connectionString: 'mongodb://mongo:27017'
+      database: 'sampledb'
+      timeoutSeconds: 30
+      schemaDiscoveryEnabled: true

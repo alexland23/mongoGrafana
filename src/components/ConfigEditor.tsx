@@ -1,5 +1,5 @@
 import React, { ChangeEvent } from 'react';
-import { Field, FieldSet, Input, SecretInput, SecretTextArea, Select, Switch } from '@grafana/ui';
+import { Field, FieldSet, Input, SecretInput, SecretTextArea, Select, Switch, TagsInput } from '@grafana/ui';
 import { DataSourcePluginOptionsEditorProps, SelectableValue } from '@grafana/data';
 import { MongoDataSourceOptions, MongoSecureJsonData } from '../types';
 
@@ -35,6 +35,16 @@ export function ConfigEditor(props: Props) {
       jsonData: {
         ...jsonData,
         [key]: event.target.checked,
+      },
+    });
+  };
+
+  const onCollectionFiltersChange = (tags: string[]) => {
+    onOptionsChange({
+      ...options,
+      jsonData: {
+        ...jsonData,
+        collectionFilters: tags,
       },
     });
   };
@@ -280,6 +290,33 @@ export function ConfigEditor(props: Props) {
             onChange={onJsonDataChange('maxPoolSize', true)}
           />
         </Field>
+      </FieldSet>
+
+      <FieldSet label="Schema discovery">
+        <Field
+          label="Enable schema discovery"
+          description="Lets the query and variable editors offer database/collection/field autocomplete by listing databases, listing collections and sampling documents. Off by default: on large clusters this can be slow, and admins may not want every collection exposed to dashboard authors."
+        >
+          <Switch
+            id="config-editor-schema-discovery-enabled"
+            value={!!jsonData.schemaDiscoveryEnabled}
+            onChange={onJsonDataSwitchChange('schemaDiscoveryEnabled')}
+          />
+        </Field>
+        {jsonData.schemaDiscoveryEnabled && (
+          <Field
+            label="Collection filters"
+            description='Glob patterns matched against "database.collection", e.g. sampledb.* to allow only that database, or !*.system.* / !*_internal to deny matches. Prefix a pattern with "!" to deny; other patterns allow. No patterns means everything is allowed. Denies always win. Press enter to add each pattern.'
+          >
+            <TagsInput
+              id="config-editor-collection-filters"
+              tags={jsonData.collectionFilters || []}
+              placeholder="sampledb.*"
+              width={60}
+              onChange={onCollectionFiltersChange}
+            />
+          </Field>
+        )}
       </FieldSet>
     </>
   );
