@@ -43,6 +43,20 @@ type PluginSettings struct {
 	// to the driver default (100) when zero.
 	MaxPoolSize uint64 `json:"maxPoolSize"`
 
+	// SchemaDiscoveryEnabled turns on the /databases, /collections and
+	// /fields resource endpoints backing autocomplete in the query and
+	// variable editors. Off by default: listing databases/collections or
+	// sampling for field discovery can be slow on large clusters, and
+	// admins may not want every collection exposed to dashboard authors.
+	SchemaDiscoveryEnabled bool `json:"schemaDiscoveryEnabled"`
+	// CollectionFilters is an ordered list of glob patterns evaluated
+	// against "database.collection" (and, for the database list, just the
+	// database segment of each pattern) by the schema discovery resource
+	// handlers. A pattern prefixed with "!" denies matches; other patterns
+	// allow them. No patterns means everything is allowed; a deny match
+	// always wins over an allow match.
+	CollectionFilters []string `json:"collectionFilters"`
+
 	Secrets *SecretPluginSettings `json:"-"`
 }
 

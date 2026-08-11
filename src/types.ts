@@ -64,6 +64,14 @@ export interface MongoDataSourceOptions extends DataSourceJsonData {
   connectTimeoutSeconds?: number;
   /** Maximum pooled connections per server */
   maxPoolSize?: number;
+  /** Enable the /databases, /collections and /fields resource endpoints that back autocomplete. Off by default. */
+  schemaDiscoveryEnabled?: boolean;
+  /**
+   * Glob patterns evaluated against "database.collection" (and, for the database list, just the
+   * database segment) by schema discovery. Prefix a pattern with "!" to deny matches; other
+   * patterns allow them. No patterns means everything is allowed.
+   */
+  collectionFilters?: string[];
 }
 
 /**

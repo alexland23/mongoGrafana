@@ -18,13 +18,32 @@ const jsonAwareFormat = (value: string | string[]) => {
 };
 
 export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourceOptions> {
+  /** Whether the /databases, /collections and /fields resource endpoints are enabled. */
+  schemaDiscoveryEnabled: boolean;
+
   constructor(instanceSettings: DataSourceInstanceSettings<MongoDataSourceOptions>) {
     super(instanceSettings);
     this.variables = new MongoVariableSupport();
+    this.schemaDiscoveryEnabled = !!instanceSettings.jsonData.schemaDiscoveryEnabled;
   }
 
   getDefaultQuery(_: CoreApp): Partial<MongoQuery> {
     return DEFAULT_QUERY;
+  }
+
+  /** Lists databases visible to schema discovery. */
+  getDatabases(): Promise<string[]> {
+    return this.getResource<string[]>('databases');
+  }
+
+  /** Lists collections in `db` (or the datasource default database) visible to schema discovery. */
+  getCollections(db?: string): Promise<string[]> {
+    return this.getResource<string[]>('collections', db ? { db } : undefined);
+  }
+
+  /** Lists field names discovered by sampling `collection` in `db` (or the datasource default database). */
+  getFields(db: string | undefined, collection: string): Promise<string[]> {
+    return this.getResource<string[]>('fields', db ? { db, collection } : { collection });
   }
 
   applyTemplateVariables(query: MongoQuery, scopedVars: ScopedVars): MongoQuery {

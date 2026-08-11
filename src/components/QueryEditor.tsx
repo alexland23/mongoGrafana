@@ -1,4 +1,4 @@
-import React, { ChangeEvent } from 'react';
+import React, { ChangeEvent, useCallback, useEffect, useRef } from 'react';
 import { CodeEditor, Combobox, ComboboxOption, InlineField, InlineFieldRow, Input } from '@grafana/ui';
 import { QueryEditorProps } from '@grafana/data';
 import { DataSource } from '../datasource';
@@ -28,8 +28,11 @@ const EDITOR_LABEL: Record<QueryType, string> = {
   command: 'Command document (extended JSON)',
 };
 
-export function QueryEditor({ query, onChange, onRunQuery }: Props) {
+const toOptions = (values: string[]): Array<ComboboxOption<string>> => values.map((v) => ({ label: v, value: v }));
+
+export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) {
   const queryType = query.queryType ?? 'aggregate';
+  const discoveryEnabled = datasource.schemaDiscoveryEnabled;
 
   const onTextInput =
     (key: 'collection' | 'database' | 'field' | 'projection' | 'sort') => (event: ChangeEvent<HTMLInputElement>) => {
@@ -44,6 +47,50 @@ export function QueryEditor({ query, onChange, onRunQuery }: Props) {
     onChange({ ...query, queryText: value });
     onRunQuery();
   };
+
+  // Async Comboboxes (unlike the static ones above) run their own state
+  // transition inside onSelectedItemChange; triggering onRunQuery
+  // synchronously from within that handler races with it. Deferring to the
+  // next tick lets the selection settle first.
+  const deferredRunQuery = () => setTimeout(onRunQuery, 0);
+
+  // Combobox re-fetches whenever the async `options` function it's given
+  // changes identity, so these must stay referentially stable across
+  // renders (an unstable reference can otherwise feed back into a render
+  // loop). Reading current values from a ref keeps a single stable
+  // function while always seeing the latest datasource/query.
+  const latest = useRef({ datasource, database: query.database, collection: query.collection });
+  useEffect(() => {
+    latest.current = { datasource, database: query.database, collection: query.collection };
+  });
+
+  const loadDatabases = useCallback(async () => {
+    try {
+      return toOptions(await latest.current.datasource.getDatabases());
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const loadCollections = useCallback(async () => {
+    try {
+      return toOptions(await latest.current.datasource.getCollections(latest.current.database));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const loadFields = useCallback(async () => {
+    const { datasource, database, collection } = latest.current;
+    if (!collection) {
+      return [];
+    }
+    try {
+      return toOptions(await datasource.getFields(database, collection));
+    } catch {
+      return [];
+    }
+  }, []);
 
   return (
     <>
@@ -61,14 +108,29 @@ export function QueryEditor({ query, onChange, onRunQuery }: Props) {
         </InlineField>
         {queryType !== 'command' && (
           <InlineField label="Collection" labelWidth={12} tooltip="Collection to query. Supports dashboard variables.">
-            <Input
-              id="query-editor-collection"
-              value={query.collection || ''}
-              placeholder="collection"
-              width={24}
-              onChange={onTextInput('collection')}
-              onBlur={onRunQuery}
-            />
+            {discoveryEnabled ? (
+              <Combobox
+                id="query-editor-collection"
+                options={loadCollections}
+                value={query.collection || null}
+                placeholder="collection"
+                width={24}
+                createCustomValue
+                onChange={(v) => {
+                  onChange({ ...query, collection: v.value });
+                  deferredRunQuery();
+                }}
+              />
+            ) : (
+              <Input
+                id="query-editor-collection"
+                value={query.collection || ''}
+                placeholder="collection"
+                width={24}
+                onChange={onTextInput('collection')}
+                onBlur={onRunQuery}
+              />
+            )}
           </InlineField>
         )}
         <InlineField label="Format" labelWidth={10}>
@@ -84,28 +146,59 @@ export function QueryEditor({ query, onChange, onRunQuery }: Props) {
           />
         </InlineField>
         <InlineField label="Database" labelWidth={12} tooltip="Optional override of the datasource default database.">
-          <Input
-            id="query-editor-database"
-            value={query.database || ''}
-            placeholder="(default)"
-            width={20}
-            onChange={onTextInput('database')}
-            onBlur={onRunQuery}
-          />
+          {discoveryEnabled ? (
+            <Combobox
+              id="query-editor-database"
+              options={loadDatabases}
+              value={query.database || null}
+              placeholder="(default)"
+              width={20}
+              createCustomValue
+              isClearable
+              onChange={(v) => {
+                onChange({ ...query, database: v?.value });
+                deferredRunQuery();
+              }}
+            />
+          ) : (
+            <Input
+              id="query-editor-database"
+              value={query.database || ''}
+              placeholder="(default)"
+              width={20}
+              onChange={onTextInput('database')}
+              onBlur={onRunQuery}
+            />
+          )}
         </InlineField>
       </InlineFieldRow>
 
       {queryType === 'distinct' && (
         <InlineFieldRow>
           <InlineField label="Field" labelWidth={14} tooltip="Field to collect distinct values of.">
-            <Input
-              id="query-editor-field"
-              value={query.field || ''}
-              placeholder="field.name"
-              width={30}
-              onChange={onTextInput('field')}
-              onBlur={onRunQuery}
-            />
+            {discoveryEnabled ? (
+              <Combobox
+                id="query-editor-field"
+                options={loadFields}
+                value={query.field || null}
+                placeholder="field.name"
+                width={30}
+                createCustomValue
+                onChange={(v) => {
+                  onChange({ ...query, field: v.value });
+                  deferredRunQuery();
+                }}
+              />
+            ) : (
+              <Input
+                id="query-editor-field"
+                value={query.field || ''}
+                placeholder="field.name"
+                width={30}
+                onChange={onTextInput('field')}
+                onBlur={onRunQuery}
+              />
+            )}
           </InlineField>
         </InlineFieldRow>
       )}
