@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 .PHONY: help setup install build build-frontend build-backend up down restart \
-	dev logs clean-stale reseed test typecheck lint e2e
+	dev logs clean-stale reseed test typecheck lint lint-go e2e
 
 help:
 	@echo "Targets:"
@@ -19,7 +19,8 @@ help:
 	@echo "  make clean-stale     - remove stopped containers left from previous runs"
 	@echo "  make test            - jest unit tests (CI mode)"
 	@echo "  make typecheck       - tsc --noEmit"
-	@echo "  make lint            - eslint"
+	@echo "  make lint            - eslint + golangci-lint"
+	@echo "  make lint-go         - golangci-lint (Go backend)"
 	@echo "  make e2e             - playwright e2e tests"
 
 # Run an npm script under the Node version pinned in .nvmrc.
@@ -69,8 +70,11 @@ test:
 typecheck:
 	$(call NVM_RUN,npm run typecheck)
 
-lint:
+lint: lint-go
 	$(call NVM_RUN,npm run lint)
+
+lint-go:
+	golangci-lint run ./...
 
 e2e:
 	$(call NVM_RUN,npm run e2e)
