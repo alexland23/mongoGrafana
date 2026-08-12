@@ -43,7 +43,7 @@ export const DEFAULT_ANNOTATION_QUERY: Partial<MongoQuery> = {
   collection: 'logs',
   queryText: `[
   { "$match": { "level": "error" } },
-  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": ["$service"] } },
+  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": "$service" } },
   { "$limit": 100 }
 ]`,
 };

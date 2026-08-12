@@ -70,14 +70,14 @@ Any query can drive dashboard annotations — write it with the regular query ed
 | `timeEnd`  | no       | End of a region annotation                 |
 | `title`    | no       | Annotation title                           |
 | `text`     | no       | Annotation body                            |
-| `tags`     | no       | Array of tag strings                       |
+| `tags`     | no       | Comma-separated tag string (BSON arrays are flattened to a JSON string, not split into tags) |
 
 If your columns are named differently, remap them from the "Mapping" section of the annotation editor instead of renaming fields in the query. A new annotation query starts pre-filled with an example that projects the seeded `logs` collection's error events into this shape:
 
 ```json
 [
   { "$match": { "level": "error" } },
-  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": ["$service"] } },
+  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": "$service" } },
   { "$limit": 100 }
 ]
 ```
