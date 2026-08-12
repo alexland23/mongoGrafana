@@ -1,7 +1,14 @@
-import { CoreApp, DataSourceInstanceSettings, DataSourceVariableSupport, ScopedVars } from '@grafana/data';
+import {
+  AnnotationQuery,
+  AnnotationSupport,
+  CoreApp,
+  DataSourceInstanceSettings,
+  DataSourceVariableSupport,
+  ScopedVars,
+} from '@grafana/data';
 import { DataSourceWithBackend, getTemplateSrv } from '@grafana/runtime';
 
-import { DEFAULT_QUERY, MongoDataSourceOptions, MongoQuery } from './types';
+import { DEFAULT_ANNOTATION_QUERY, DEFAULT_QUERY, MongoDataSourceOptions, MongoQuery } from './types';
 
 /**
  * Lets dashboard variables be defined with the regular query editor; the
@@ -20,6 +27,12 @@ const jsonAwareFormat = (value: string | string[]) => {
 export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourceOptions> {
   /** Whether the /databases, /collections and /fields resource endpoints are enabled. */
   schemaDiscoveryEnabled: boolean;
+
+  /** Grafana's standard frame > event mapping reads `time`/`timeEnd`/`title`/`text`/`tags` columns; see src/README.md. */
+  annotations: AnnotationSupport<MongoQuery> = {
+    getDefaultQuery: (): Partial<MongoQuery> => DEFAULT_ANNOTATION_QUERY,
+    prepareQuery: (anno: AnnotationQuery<MongoQuery>): MongoQuery | undefined => anno.target,
+  };
 
   constructor(instanceSettings: DataSourceInstanceSettings<MongoDataSourceOptions>) {
     super(instanceSettings);
