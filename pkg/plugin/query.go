@@ -15,6 +15,91 @@ import (
 // optionally wrapped in quotes, e.g. $__timeFilter(time) or $__timeFilter("time").
 var timeFilterRe = regexp.MustCompile(`\$__timeFilter\(\s*"?([A-Za-z0-9_.]+)"?\s*\)`)
 
+// unixEpochFilterRe matches $__unixEpochFilter(field) calls, the epoch-seconds
+// equivalent of $__timeFilter for collections that store timestamps as numbers
+// rather than BSON dates.
+var unixEpochFilterRe = regexp.MustCompile(`\$__unixEpochFilter\(\s*"?([A-Za-z0-9_.]+)"?\s*\)`)
+
+// intervalArgPattern matches an optional interval argument shared by
+// $__timeGroup and $__unixEpochGroup, e.g. "1m", "30s", "1h", "1d".
+const intervalArgPattern = `[0-9]+(?:ms|s|m|h|d|w)`
+
+// timeGroupRe matches $__timeGroup(field[, interval]) calls.
+var timeGroupRe = regexp.MustCompile(`\$__timeGroup\(\s*"?([A-Za-z0-9_.]+)"?\s*(?:,\s*"?(` + intervalArgPattern + `)"?\s*)?\)`)
+
+// unixEpochGroupRe matches $__unixEpochGroup(field[, interval]) calls.
+var unixEpochGroupRe = regexp.MustCompile(`\$__unixEpochGroup\(\s*"?([A-Za-z0-9_.]+)"?\s*(?:,\s*"?(` + intervalArgPattern + `)"?\s*)?\)`)
+
+// intervalArgRe extracts the numeric amount and unit from an interval argument.
+var intervalArgRe = regexp.MustCompile(`^([0-9]+)(ms|s|m|h|d|w)$`)
+
+// parseIntervalArg parses a Grafana-style interval string ("30s", "5m", "2h",
+// "1d", "1w") into a time.Duration. time.ParseDuration doesn't support "d"
+// or "w", so those units are handled by hand.
+func parseIntervalArg(s string) (time.Duration, error) {
+	m := intervalArgRe.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("invalid interval %q", s)
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	switch m[2] {
+	case "ms":
+		return time.Duration(n) * time.Millisecond, nil
+	case "s":
+		return time.Duration(n) * time.Second, nil
+	case "m":
+		return time.Duration(n) * time.Minute, nil
+	case "h":
+		return time.Duration(n) * time.Hour, nil
+	case "d":
+		return time.Duration(n) * 24 * time.Hour, nil
+	case "w":
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("invalid interval unit in %q", s)
+	}
+}
+
+// resolveGroupInterval determines the grouping duration shared by
+// $__timeGroup and $__unixEpochGroup: an explicit interval argument
+// overrides the dashboard's interval, falling back to it silently if the
+// argument fails to parse (parseIntervalArg's regexp match already
+// guarantees this can't happen for text the macro regexps accept).
+func resolveGroupInterval(dashboardInterval time.Duration, arg string) time.Duration {
+	if arg == "" {
+		return dashboardInterval
+	}
+	if parsed, err := parseIntervalArg(arg); err == nil {
+		return parsed
+	}
+	return dashboardInterval
+}
+
+// dateTruncUnitAndBinSize converts a duration into the largest whole
+// $dateTrunc unit/binSize pair that represents it, e.g. 2*time.Hour ->
+// ("hour", 2), 90*time.Second -> ("second", 90). $dateTrunc has no
+// millisecond unit, so sub-second or otherwise non-whole-second durations
+// are rounded to the nearest second (minimum 1s).
+func dateTruncUnitAndBinSize(d time.Duration) (string, int64) {
+	switch {
+	case d <= 0:
+		return "second", 1
+	case d%(24*time.Hour) == 0:
+		return "day", int64(d / (24 * time.Hour))
+	case d%time.Hour == 0:
+		return "hour", int64(d / time.Hour)
+	case d%time.Minute == 0:
+		return "minute", int64(d / time.Minute)
+	case d%time.Second == 0:
+		return "second", int64(d / time.Second)
+	default:
+		return "second", max(int64(d.Round(time.Second)/time.Second), 1)
+	}
+}
+
 // formatInterval renders a duration the way Grafana's built-in $__interval
 // variable does elsewhere: the largest whole unit that fits, e.g. "30s", "5m", "2h".
 func formatInterval(d time.Duration) string {
@@ -67,6 +152,27 @@ func interpolateMacros(text string, q backend.DataQuery) string {
 	text = timeFilterRe.ReplaceAllStringFunc(text, func(match string) string {
 		field := timeFilterRe.FindStringSubmatch(match)[1]
 		return fmt.Sprintf(`{%q: {"$gte": %s, "$lte": %s}}`, field, fromDate, toDate)
+	})
+
+	text = unixEpochFilterRe.ReplaceAllStringFunc(text, func(match string) string {
+		field := unixEpochFilterRe.FindStringSubmatch(match)[1]
+		return fmt.Sprintf(`{%q: {"$gte": %s, "$lte": %s}}`, field, fromEpochSec, toEpochSec)
+	})
+
+	text = timeGroupRe.ReplaceAllStringFunc(text, func(match string) string {
+		sub := timeGroupRe.FindStringSubmatch(match)
+		field, arg := sub[1], sub[2]
+		d := resolveGroupInterval(q.Interval, arg)
+		unit, binSize := dateTruncUnitAndBinSize(d)
+		return fmt.Sprintf(`{"$dateTrunc": {"date": "$%s", "unit": %q, "binSize": %d}}`, field, unit, binSize)
+	})
+
+	text = unixEpochGroupRe.ReplaceAllStringFunc(text, func(match string) string {
+		sub := unixEpochGroupRe.FindStringSubmatch(match)
+		field, arg := sub[1], sub[2]
+		d := resolveGroupInterval(q.Interval, arg)
+		intervalSec := max(int64(d.Round(time.Second)/time.Second), 1)
+		return fmt.Sprintf(`{"$subtract": ["$%s", {"$mod": ["$%s", %d]}]}`, field, field, intervalSec)
 	})
 
 	r := strings.NewReplacer(

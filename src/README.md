@@ -25,26 +25,31 @@ Query and visualize MongoDB data in Grafana. Write aggregation pipelines, find f
 
 Macros are replaced server-side before the query runs, so they also work in alerting:
 
-| Macro                  | Replaced with                                         |
-| ---------------------- | ------------------------------------------------------ |
-| `$__timeFilter(field)` | A full match clause: `{ field: { "$gte": ..., "$lte": ... } }` |
-| `"$__timeFrom"`        | Dashboard range start as a BSON date                   |
-| `"$__timeTo"`          | Dashboard range end as a BSON date                     |
-| `"$__timeFrom_ms"`     | Range start as epoch milliseconds (number)              |
-| `"$__timeTo_ms"`       | Range end as epoch milliseconds (number)                |
-| `"$__from"`            | Range start as epoch milliseconds (number)              |
-| `"$__to"`               | Range end as epoch milliseconds (number)                |
-| `"$__unixEpochFrom"`   | Range start as epoch seconds (number)                   |
-| `"$__unixEpochTo"`     | Range end as epoch seconds (number)                     |
-| `"$__interval"`        | Suggested group-by interval, e.g. `"30s"` (string)      |
-| `"$__interval_ms"`     | Suggested group-by interval in milliseconds             |
-| `"$__maxDataPoints"`   | Panel max data points (handy for `$limit`)              |
+| Macro                          | Replaced with                                         |
+| ------------------------------ | ------------------------------------------------------ |
+| `$__timeFilter(field)`         | A full match clause: `{ field: { "$gte": ..., "$lte": ... } }` on a BSON date field |
+| `$__unixEpochFilter(field)`    | A full match clause on an epoch-seconds numeric field |
+| `$__timeGroup(field[, interval])` | A `$dateTrunc` expression bucketing a BSON date field, e.g. for `$group._id` |
+| `$__unixEpochGroup(field[, interval])` | An arithmetic bucketing expression for an epoch-seconds numeric field |
+| `"$__timeFrom"`                | Dashboard range start as a BSON date                   |
+| `"$__timeTo"`                  | Dashboard range end as a BSON date                     |
+| `"$__timeFrom_ms"`             | Range start as epoch milliseconds (number)              |
+| `"$__timeTo_ms"`               | Range end as epoch milliseconds (number)                |
+| `"$__from"`                    | Range start as epoch milliseconds (number)              |
+| `"$__to"`                       | Range end as epoch milliseconds (number)                |
+| `"$__unixEpochFrom"`           | Range start as epoch seconds (number)                   |
+| `"$__unixEpochTo"`             | Range end as epoch seconds (number)                     |
+| `"$__interval"`                | Suggested group-by interval, e.g. `"30s"` (string)      |
+| `"$__interval_ms"`             | Suggested group-by interval in milliseconds             |
+| `"$__maxDataPoints"`           | Panel max data points (handy for `$limit`)              |
 
-`$__timeFilter(field)` expands to a whole clause, not a value, so use it unquoted in place of a match document:
+`$__timeFilter(field)`, `$__unixEpochFilter(field)`, `$__timeGroup(...)` and `$__unixEpochGroup(...)` all expand to a whole clause or expression, not a value, so use them unquoted:
 
 ```json
 [{ "$match": $__timeFilter(time) }]
 ```
+
+`$__timeGroup` and `$__unixEpochGroup` take an optional interval argument (`"30s"`, `"5m"`, `"1h"`, `"1d"`, `"1w"`); if omitted, they use the dashboard's suggested `$__interval`.
 
 Example — average CPU per host bucketed by 10 minutes, limited to the dashboard time range:
 
@@ -52,7 +57,7 @@ Example — average CPU per host bucketed by 10 minutes, limited to the dashboar
 [
   { "$match": $__timeFilter(time) },
   { "$group": {
-      "_id": { "host": "$host", "t": { "$dateTrunc": { "date": "$time", "unit": "minute", "binSize": 10 } } },
+      "_id": { "host": "$host", "t": $__timeGroup(time, "10m") },
       "avg_cpu": { "$avg": "$cpu" }
   } },
   { "$project": { "_id": 0, "time": "$_id.t", "host": "$_id.host", "avg_cpu": 1 } },
