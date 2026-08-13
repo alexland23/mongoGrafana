@@ -20,8 +20,8 @@ var timeFilterRe = regexp.MustCompile(`\$__timeFilter\(\s*"?([A-Za-z0-9_.]+)"?\s
 // rather than BSON dates.
 var unixEpochFilterRe = regexp.MustCompile(`\$__unixEpochFilter\(\s*"?([A-Za-z0-9_.]+)"?\s*\)`)
 
-// intervalArgRe matches an optional interval argument shared by $__timeGroup
-// and $__unixEpochGroup, e.g. "1m", "30s", "1h", "1d".
+// intervalArgPattern matches an optional interval argument shared by
+// $__timeGroup and $__unixEpochGroup, e.g. "1m", "30s", "1h", "1d".
 const intervalArgPattern = `[0-9]+(?:ms|s|m|h|d|w)`
 
 // timeGroupRe matches $__timeGroup(field[, interval]) calls.
