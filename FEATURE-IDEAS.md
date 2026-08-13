@@ -16,11 +16,16 @@ The ideas below would move it from "works" to "pleasant to use and competitive w
 
 ## Tier 1 — High impact, moderate effort (recommended first)
 
-### 1. Schema discovery: database / collection / field autocomplete
+### 1. Schema discovery: database / collection / field autocomplete — done
 Today database, collection, and field are free-text inputs — the biggest UX gap. Add a backend **`CallResource` handler** exposing endpoints like `/databases`, `/collections?db=x`, `/fields?db=x&collection=y` (fields via a `$sample` + key-scan aggregation). The frontend swaps the text inputs for async `Combobox`es fed by `getResource()`.
 
-- Backend: new `pkg/plugin/resource.go`, register `CallResourceHandler` in `pkg/plugin/datasource.go`
-- Frontend: `src/components/QueryEditor.tsx`, `src/datasource.ts`
+Make discovery **opt-in, not on-by-default**: on very large clusters, listing databases/collections or sampling for field discovery can be slow or expensive, and admins may not want every collection exposed to dashboard authors. Two settings knobs, both in `jsonData` (non-sensitive, so no `secureJsonData`):
+
+- **Enable schema discovery** — a toggle in the config editor (default off). When off, `/databases`, `/collections`, `/fields` all return a "disabled" response (or are unregistered) and the frontend falls back to today's free-text inputs.
+- **Collection filtering** — allow-list and/or deny-list glob patterns (e.g. `sampledb.*`, `!*.system.*`, `!*_internal`) evaluated by the `/databases` and `/collections` resource handlers before returning results, so restricted collections never reach the frontend regardless of discovery being enabled. Field discovery inherits the same filter (no `/fields` for a hidden collection).
+
+- Backend: new `pkg/plugin/resource.go`, register `CallResourceHandler` in `pkg/plugin/datasource.go`; filter/glob matching plus the enable flag in `pkg/models/settings.go`
+- Frontend: `src/components/ConfigEditor.tsx` (discovery toggle + filter pattern list), `src/components/QueryEditor.tsx` (fall back to text inputs when discovery is disabled or `getResource()` errors), `src/datasource.ts`
 - Bonus: the same field list can drive Monaco autocomplete inside the query editor
 
 ### 2. Dedicated variable query editor
@@ -28,10 +33,10 @@ Variables currently work via generic `DataSourceVariableSupport` ("first column 
 
 - Frontend: `src/datasource.ts`, new `src/components/VariableQueryEditor.tsx`, `src/module.ts`
 
-### 3. Annotation query editor
-`plugin.json` declares `annotations: true` but there's no dedicated editor — users get the raw query editor with no guidance on required columns. Register annotation support in `datasource.ts` with a configurable mapping (time, timeEnd, title, text, tags), or at minimum document the expected column names and set sensible defaults.
+### 3. Annotation query editor — done
+`plugin.json` declares `annotations: true` but there was no dedicated editor — users got the raw query editor with no guidance on required columns. Registered `annotations: AnnotationSupport<MongoQuery>` on the datasource with a default example query; Grafana's standard frame > event mapping and its built-in per-annotation "Mapping" section (time/timeEnd/title/text/tags) handle the rest, no custom editor needed. Documented the expected columns in `src/README.md`.
 
-- Frontend: `src/datasource.ts`, `src/module.ts`
+- Frontend: `src/datasource.ts`, `src/types.ts`, `src/README.md`
 
 ### 4. More macros, especially `$__timeFilter`
 Add the macros people reach for from the SQL datasources:

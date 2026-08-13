@@ -60,6 +60,28 @@ With format **Time series**, rows containing a date field, numeric fields and op
 
 Dashboard variables are interpolated in the collection, database, field and query text (multi-value variables become JSON arrays, so `{"host": {"$in": $host}}` works). To populate a variable from MongoDB, choose this data source in the variable editor and write any query — the first column supplies the values (the **Distinct** type is a natural fit).
 
+## Annotations
+
+Any query can drive dashboard annotations — write it with the regular query editor, in the "Annotations" section of dashboard settings. The result is mapped into annotation events by column name:
+
+| Column     | Required | Meaning                                    |
+| ---------- | -------- | ------------------------------------------ |
+| `time`     | yes      | Event timestamp                            |
+| `timeEnd`  | no       | End of a region annotation                 |
+| `title`    | no       | Annotation title                           |
+| `text`     | no       | Annotation body                            |
+| `tags`     | no       | Comma-separated tag string (BSON arrays are flattened to a JSON string, not split into tags) |
+
+If your columns are named differently, remap them from the "Mapping" section of the annotation editor instead of renaming fields in the query. A new annotation query starts pre-filled with an example that projects the seeded `logs` collection's error events into this shape:
+
+```json
+[
+  { "$match": { "level": "error" } },
+  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": "$service" } },
+  { "$limit": 100 }
+]
+```
+
 ## Extended JSON
 
 Queries are parsed as [MongoDB extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/), so BSON types are expressible: `{"$date": "2026-01-01T00:00:00Z"}`, `{"$oid": "65f0..."}`, `{"$numberDecimal": "9.99"}`, etc.

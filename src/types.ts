@@ -36,6 +36,18 @@ export const DEFAULT_QUERY: Partial<MongoQuery> = {
 ]`,
 };
 
+/** Pre-fills new annotation queries with an example matching the "Annotations" column contract (see src/README.md). */
+export const DEFAULT_ANNOTATION_QUERY: Partial<MongoQuery> = {
+  queryType: 'aggregate',
+  format: 'table',
+  collection: 'logs',
+  queryText: `[
+  { "$match": { "level": "error" } },
+  { "$project": { "time": 1, "title": "$level", "text": "$message", "tags": "$service" } },
+  { "$limit": 100 }
+]`,
+};
+
 /**
  * Options configured for each DataSource instance
  */
