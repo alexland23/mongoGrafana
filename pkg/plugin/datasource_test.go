@@ -47,6 +47,54 @@ func TestInterpolateMacros(t *testing.T) {
 	}
 }
 
+func TestInterpolateMacrosTimeFilter(t *testing.T) {
+	q := testDataQuery()
+
+	in := `{"$match": $__timeFilter(time)}`
+	out := interpolateMacros(in, q)
+	want := `{"$match": {"time": {"$gte": {"$date":{"$numberLong":"1700000000000"}}, "$lte": {"$date":{"$numberLong":"1700003600000"}}}}}`
+	if out != want {
+		t.Errorf("timeFilter interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	doc, err := parseDocument(out)
+	if err != nil {
+		t.Fatalf("interpolated timeFilter does not parse: %v", err)
+	}
+	if len(doc) != 1 || doc[0].Key != "$match" {
+		t.Fatalf("unexpected parsed document: %+v", doc)
+	}
+
+	// Quoted field name is also accepted.
+	quoted := interpolateMacros(`$__timeFilter("nested.field")`, q)
+	if !strings.Contains(quoted, `"nested.field"`) {
+		t.Errorf("quoted field name not preserved:\n%s", quoted)
+	}
+}
+
+func TestInterpolateMacrosGlobals(t *testing.T) {
+	q := testDataQuery()
+
+	in := `{"from": "$__from", "to": "$__to", "unixFrom": "$__unixEpochFrom", "unixTo": "$__unixEpochTo", "interval": "$__interval"}`
+	out := interpolateMacros(in, q)
+
+	for _, want := range []string{
+		`"from": 1700000000000`,
+		`"to": 1700003600000`,
+		`"unixFrom": 1700000000`,
+		`"unixTo": 1700003600`,
+		`"interval": "30s"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("interpolated query missing %q:\n%s", want, out)
+		}
+	}
+
+	if _, err := parseDocument(out); err != nil {
+		t.Errorf("interpolated document does not parse: %v", err)
+	}
+}
+
 func TestParsePipeline(t *testing.T) {
 	pipeline, err := parsePipeline(`[{"$match": {"a": 1}}, {"$group": {"_id": "$b"}}]`)
 	if err != nil {

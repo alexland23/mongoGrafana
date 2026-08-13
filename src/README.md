@@ -25,20 +25,32 @@ Query and visualize MongoDB data in Grafana. Write aggregation pipelines, find f
 
 Macros are replaced server-side before the query runs, so they also work in alerting:
 
-| Macro               | Replaced with                                  |
-| ------------------- | ---------------------------------------------- |
-| `"$__timeFrom"`     | Dashboard range start as a BSON date           |
-| `"$__timeTo"`       | Dashboard range end as a BSON date             |
-| `"$__timeFrom_ms"`  | Range start as epoch milliseconds (number)     |
-| `"$__timeTo_ms"`    | Range end as epoch milliseconds (number)       |
-| `"$__interval_ms"`  | Suggested group-by interval in milliseconds    |
-| `"$__maxDataPoints"`| Panel max data points (handy for `$limit`)     |
+| Macro                  | Replaced with                                         |
+| ---------------------- | ------------------------------------------------------ |
+| `$__timeFilter(field)` | A full match clause: `{ field: { "$gte": ..., "$lte": ... } }` |
+| `"$__timeFrom"`        | Dashboard range start as a BSON date                   |
+| `"$__timeTo"`          | Dashboard range end as a BSON date                     |
+| `"$__timeFrom_ms"`     | Range start as epoch milliseconds (number)              |
+| `"$__timeTo_ms"`       | Range end as epoch milliseconds (number)                |
+| `"$__from"`            | Range start as epoch milliseconds (number)              |
+| `"$__to"`               | Range end as epoch milliseconds (number)                |
+| `"$__unixEpochFrom"`   | Range start as epoch seconds (number)                   |
+| `"$__unixEpochTo"`     | Range end as epoch seconds (number)                     |
+| `"$__interval"`        | Suggested group-by interval, e.g. `"30s"` (string)      |
+| `"$__interval_ms"`     | Suggested group-by interval in milliseconds             |
+| `"$__maxDataPoints"`   | Panel max data points (handy for `$limit`)              |
+
+`$__timeFilter(field)` expands to a whole clause, not a value, so use it unquoted in place of a match document:
+
+```json
+[{ "$match": $__timeFilter(time) }]
+```
 
 Example — average CPU per host bucketed by 10 minutes, limited to the dashboard time range:
 
 ```json
 [
-  { "$match": { "time": { "$gte": "$__timeFrom", "$lte": "$__timeTo" } } },
+  { "$match": $__timeFilter(time) },
   { "$group": {
       "_id": { "host": "$host", "t": { "$dateTrunc": { "date": "$time", "unit": "minute", "binSize": 10 } } },
       "avg_cpu": { "$avg": "$cpu" }
