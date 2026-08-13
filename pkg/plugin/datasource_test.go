@@ -161,6 +161,22 @@ func TestInterpolateMacrosUnixEpochGroup(t *testing.T) {
 	if _, err := parseDocument(fmt.Sprintf(`{"g": %s}`, out)); err != nil {
 		t.Fatalf("interpolated unixEpochGroup does not parse: %v", err)
 	}
+
+	// A sub-second interval must round to the nearest second (minimum 1),
+	// not silently truncate to 0 and clamp.
+	out = interpolateMacros(`$__unixEpochGroup(ts, "500ms")`, q)
+	want = `{"$subtract": ["$ts", {"$mod": ["$ts", 1]}]}`
+	if out != want {
+		t.Errorf("unixEpochGroup sub-second interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	// A fractional-second interval rounds to the nearest second rather
+	// than truncating down.
+	out = interpolateMacros(`$__unixEpochGroup(ts, "1900ms")`, q)
+	want = `{"$subtract": ["$ts", {"$mod": ["$ts", 2]}]}`
+	if out != want {
+		t.Errorf("unixEpochGroup rounding interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
 }
 
 func TestParsePipeline(t *testing.T) {

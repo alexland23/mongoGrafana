@@ -166,7 +166,7 @@ func interpolateMacros(text string, q backend.DataQuery) string {
 				d = parsed
 			}
 		}
-		intervalSec := max(int64(d.Seconds()), 1)
+		intervalSec := max(int64(d.Round(time.Second)/time.Second), 1)
 		return fmt.Sprintf(`{"$subtract": ["$%s", {"$mod": ["$%s", %d]}]}`, field, field, intervalSec)
 	})
 
