@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,65 @@ func TestInterpolateMacrosGlobals(t *testing.T) {
 
 	if _, err := parseDocument(out); err != nil {
 		t.Errorf("interpolated document does not parse: %v", err)
+	}
+}
+
+func TestInterpolateMacrosUnixEpochFilter(t *testing.T) {
+	q := testDataQuery()
+
+	out := interpolateMacros(`{"$match": $__unixEpochFilter(ts)}`, q)
+	want := `{"$match": {"ts": {"$gte": 1700000000, "$lte": 1700003600}}}`
+	if out != want {
+		t.Errorf("unixEpochFilter interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+	if _, err := parseDocument(out); err != nil {
+		t.Fatalf("interpolated unixEpochFilter does not parse: %v", err)
+	}
+}
+
+func TestInterpolateMacrosTimeGroup(t *testing.T) {
+	q := testDataQuery() // q.Interval == 30s
+
+	// Without an explicit interval, falls back to the dashboard's $__interval.
+	out := interpolateMacros(`{"_id": $__timeGroup(time)}`, q)
+	want := `{"_id": {"$dateTrunc": {"date": "$time", "unit": "second", "binSize": 30}}}`
+	if out != want {
+		t.Errorf("timeGroup interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	// An explicit interval argument overrides the dashboard interval.
+	out = interpolateMacros(`$__timeGroup(time, "1h")`, q)
+	want = `{"$dateTrunc": {"date": "$time", "unit": "hour", "binSize": 1}}`
+	if out != want {
+		t.Errorf("timeGroup interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	doc, err := parseDocument(fmt.Sprintf(`{"g": %s}`, out))
+	if err != nil {
+		t.Fatalf("interpolated timeGroup does not parse: %v", err)
+	}
+	if len(doc) != 1 {
+		t.Fatalf("unexpected parsed document: %+v", doc)
+	}
+}
+
+func TestInterpolateMacrosUnixEpochGroup(t *testing.T) {
+	q := testDataQuery() // q.Interval == 30s
+
+	out := interpolateMacros(`$__unixEpochGroup(ts)`, q)
+	want := `{"$subtract": ["$ts", {"$mod": ["$ts", 30]}]}`
+	if out != want {
+		t.Errorf("unixEpochGroup interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	out = interpolateMacros(`$__unixEpochGroup(ts, "5m")`, q)
+	want = `{"$subtract": ["$ts", {"$mod": ["$ts", 300]}]}`
+	if out != want {
+		t.Errorf("unixEpochGroup interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
+
+	if _, err := parseDocument(fmt.Sprintf(`{"g": %s}`, out)); err != nil {
+		t.Fatalf("interpolated unixEpochGroup does not parse: %v", err)
 	}
 }
 
