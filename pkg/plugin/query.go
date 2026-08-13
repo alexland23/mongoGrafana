@@ -65,7 +65,9 @@ func parseIntervalArg(s string) (time.Duration, error) {
 
 // dateTruncUnitAndBinSize converts a duration into the largest whole
 // $dateTrunc unit/binSize pair that represents it, e.g. 2*time.Hour ->
-// ("hour", 2), 90*time.Second -> ("second", 90).
+// ("hour", 2), 90*time.Second -> ("second", 90). $dateTrunc has no
+// millisecond unit, so sub-second or otherwise non-whole-second durations
+// are rounded to the nearest second (minimum 1s).
 func dateTruncUnitAndBinSize(d time.Duration) (string, int64) {
 	switch {
 	case d <= 0:
@@ -79,7 +81,7 @@ func dateTruncUnitAndBinSize(d time.Duration) (string, int64) {
 	case d%time.Second == 0:
 		return "second", int64(d / time.Second)
 	default:
-		return "millisecond", d.Milliseconds()
+		return "second", max(int64(d.Round(time.Second)/time.Second), 1)
 	}
 }
 

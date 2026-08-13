@@ -133,6 +133,14 @@ func TestInterpolateMacrosTimeGroup(t *testing.T) {
 	if len(doc) != 1 {
 		t.Fatalf("unexpected parsed document: %+v", doc)
 	}
+
+	// A sub-second interval must not produce $dateTrunc's unsupported
+	// "millisecond" unit; it should round to a whole second instead.
+	out = interpolateMacros(`$__timeGroup(time, "500ms")`, q)
+	want = `{"$dateTrunc": {"date": "$time", "unit": "second", "binSize": 1}}`
+	if out != want {
+		t.Errorf("timeGroup sub-second interpolation mismatch:\ngot:  %s\nwant: %s", out, want)
+	}
 }
 
 func TestInterpolateMacrosUnixEpochGroup(t *testing.T) {
