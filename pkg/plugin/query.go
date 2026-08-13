@@ -63,6 +63,21 @@ func parseIntervalArg(s string) (time.Duration, error) {
 	}
 }
 
+// resolveGroupInterval determines the grouping duration shared by
+// $__timeGroup and $__unixEpochGroup: an explicit interval argument
+// overrides the dashboard's interval, falling back to it silently if the
+// argument fails to parse (parseIntervalArg's regexp match already
+// guarantees this can't happen for text the macro regexps accept).
+func resolveGroupInterval(dashboardInterval time.Duration, arg string) time.Duration {
+	if arg == "" {
+		return dashboardInterval
+	}
+	if parsed, err := parseIntervalArg(arg); err == nil {
+		return parsed
+	}
+	return dashboardInterval
+}
+
 // dateTruncUnitAndBinSize converts a duration into the largest whole
 // $dateTrunc unit/binSize pair that represents it, e.g. 2*time.Hour ->
 // ("hour", 2), 90*time.Second -> ("second", 90). $dateTrunc has no
@@ -147,12 +162,7 @@ func interpolateMacros(text string, q backend.DataQuery) string {
 	text = timeGroupRe.ReplaceAllStringFunc(text, func(match string) string {
 		sub := timeGroupRe.FindStringSubmatch(match)
 		field, arg := sub[1], sub[2]
-		d := q.Interval
-		if arg != "" {
-			if parsed, err := parseIntervalArg(arg); err == nil {
-				d = parsed
-			}
-		}
+		d := resolveGroupInterval(q.Interval, arg)
 		unit, binSize := dateTruncUnitAndBinSize(d)
 		return fmt.Sprintf(`{"$dateTrunc": {"date": "$%s", "unit": %q, "binSize": %d}}`, field, unit, binSize)
 	})
@@ -160,12 +170,7 @@ func interpolateMacros(text string, q backend.DataQuery) string {
 	text = unixEpochGroupRe.ReplaceAllStringFunc(text, func(match string) string {
 		sub := unixEpochGroupRe.FindStringSubmatch(match)
 		field, arg := sub[1], sub[2]
-		d := q.Interval
-		if arg != "" {
-			if parsed, err := parseIntervalArg(arg); err == nil {
-				d = parsed
-			}
-		}
+		d := resolveGroupInterval(q.Interval, arg)
 		intervalSec := max(int64(d.Round(time.Second)/time.Second), 1)
 		return fmt.Sprintf(`{"$subtract": ["$%s", {"$mod": ["$%s", %d]}]}`, field, field, intervalSec)
 	})
