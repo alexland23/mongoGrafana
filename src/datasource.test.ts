@@ -66,4 +66,24 @@ describe('DataSource live streaming', () => {
     expect(responses[0].error?.message).toContain('subscribe failed: not found');
     expect(responses[0].error?.refId).toBe('A');
   });
+
+  it('resolves distinct live channels for query texts that collide under a 32-bit hash', () => {
+    getDataStream.mockReturnValue(throwError(() => new Error('unused')));
+
+    // These two strings collide under the plain djb2 32-bit hash previously used for
+    // hashChannelSegment (both hash to "1ghqtjy"), demonstrating the ~64k-input birthday
+    // bound that made cross-wired live subscriptions (PR #29 review, finding 7) reachable
+    // in practice. The widened 64-bit digest must resolve them to different channels.
+    const queryA: MongoQuery = { ...baseTarget, queryText: '902662a29bf29504721fe991' };
+    const queryB: MongoQuery = { ...baseTarget, queryText: 'da191659f798e5ed2e216824' };
+
+    const ds = new DataSource(instanceSettings);
+    ds.query({ ...baseRequest, targets: [queryA] }).subscribe();
+    ds.query({ ...baseRequest, targets: [queryB] }).subscribe();
+
+    expect(getDataStream).toHaveBeenCalledTimes(2);
+    const pathA = getDataStream.mock.calls[0][0].addr.path;
+    const pathB = getDataStream.mock.calls[1][0].addr.path;
+    expect(pathA).not.toEqual(pathB);
+  });
 });

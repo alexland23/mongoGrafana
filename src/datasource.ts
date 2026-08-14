@@ -24,13 +24,21 @@ const isLiveTarget = (query: MongoQuery): boolean => query.format === 'logs' && 
 const sanitizeChannelSegment = (value: string): string => value.replace(/[^A-Za-z0-9_\-.]/g, '_');
 
 /** Cheap (non-cryptographic) hash so free-form filter text can distinguish live channels without
- * blowing past Grafana Live's 160-character channel ID limit or violating its character allowlist. */
+ * blowing past Grafana Live's 160-character channel ID limit or violating its character allowlist.
+ *
+ * Combines two independent 32-bit hashes (djb2 + sdbm) into a 64-bit digest. A single 32-bit hash
+ * collides at a ~64k-input birthday bound, which is reachable in practice and would silently
+ * cross-wire two panels' live subscriptions onto the same Grafana Live channel (see PR #29 review,
+ * finding 7). 64 bits pushes that bound out to ~4 billion inputs. */
 const hashChannelSegment = (value: string): string => {
-  let hash = 5381;
+  let djb2 = 5381;
+  let sdbm = 0;
   for (let i = 0; i < value.length; i++) {
-    hash = (hash * 33) ^ value.charCodeAt(i);
+    const code = value.charCodeAt(i);
+    djb2 = (djb2 * 33) ^ code;
+    sdbm = (code + (sdbm << 6) + (sdbm << 16) - sdbm) | 0;
   }
-  return (hash >>> 0).toString(36);
+  return (djb2 >>> 0).toString(36) + (sdbm >>> 0).toString(36);
 };
 
 /** Distinguishing query params baked into the live channel path so editing the filter, collection or

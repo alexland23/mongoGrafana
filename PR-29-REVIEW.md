@@ -28,7 +28,7 @@ Findings from `/code-review medium` on `16-live-streaming-log-tailing` (change-s
   `docsToFrame` derives each streamed frame's schema independently per call, so consecutive live frames on the same Grafana Live channel can have different field sets/order.
   *Failure:* Heterogeneous log documents (some with an `error`/`stack` field, some without) each produce a single-document frame via `watchChangeStream`'s `docsToFrame([]bson.D{event.FullDocument}, ...)` call. Grafana Live's streaming consumer generally expects a stable schema per channel; a field appearing/disappearing between frames can cause the logs panel to drop data or reset instead of appending rows.
 
-- [ ] **7. Live channel hash collisions can cross-wire subscriptions** — `src/datasource.ts:26`
+- [x] **7. Live channel hash collisions can cross-wire subscriptions** — `src/datasource.ts:26`
   `hashChannelSegment` is a 32-bit non-cryptographic hash with no collision handling, used as the sole differentiator for arbitrary-length filter text in the live channel path.
   *Failure:* Two different panels/queries on the same collection/database/refId with distinct `queryText` values that hash-collide (feasible at ~64k-input birthday bound) resolve to the same Grafana Live channel path. Per the `RunStream` contract, only the first subscriber's `req.Data` establishes the running stream for a channel, so the second query's Live subscription silently receives the first query's filtered results instead of its own.
 
