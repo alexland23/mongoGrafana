@@ -53,6 +53,9 @@ func (d *Datasource) parseStreamQuery(raw json.RawMessage) (*mongo.Collection, b
 	if err != nil {
 		return nil, nil, qm, fmt.Errorf("filter: %w", err)
 	}
+	if err := newOperatorGuard(d.settings).checkDoc(filter); err != nil {
+		return nil, nil, qm, err
+	}
 
 	return d.client.Database(dbName).Collection(qm.Collection), filter, qm, nil
 }

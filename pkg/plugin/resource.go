@@ -26,6 +26,10 @@ const fieldSampleSize = 50
 // since listing databases/collections or sampling for fields can be slow on
 // large clusters and admins may not want every collection exposed.
 func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
+	if strings.TrimPrefix(req.Path, "/") == "explain" {
+		return d.handleExplain(ctx, sender, req)
+	}
+
 	if !d.settings.SchemaDiscoveryEnabled {
 		return sendJSON(sender, http.StatusNotImplemented, map[string]string{"message": "schema discovery is disabled for this datasource"})
 	}
@@ -46,6 +50,79 @@ func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResource
 	default:
 		return sendJSON(sender, http.StatusNotFound, map[string]string{"message": "unknown resource"})
 	}
+}
+
+// explainRequest is the body posted to the /explain resource endpoint by
+// the query editor's Explain button.
+type explainRequest struct {
+	QueryType  string `json:"queryType"`
+	Database   string `json:"database"`
+	Collection string `json:"collection"`
+	QueryText  string `json:"queryText"`
+}
+
+// handleExplain runs MongoDB's explain command for an aggregate or find
+// query and returns the raw query plan document, so the query editor can
+// show it without executing the query for real. Macros ($__timeFrom etc.)
+// are not interpolated here -- there's no dashboard time range at this
+// point -- so a query relying on them should be explained with literal
+// values substituted, or checked via the executed query string the panel
+// inspector shows after a real run.
+func (d *Datasource) handleExplain(ctx context.Context, sender backend.CallResourceResponseSender, req *backend.CallResourceRequest) error {
+	var er explainRequest
+	if err := json.Unmarshal(req.Body, &er); err != nil {
+		return sendJSON(sender, http.StatusBadRequest, map[string]string{"message": err.Error()})
+	}
+
+	dbName := er.Database
+	if dbName == "" {
+		dbName = d.settings.Database
+	}
+	if dbName == "" || er.Collection == "" {
+		return sendJSON(sender, http.StatusBadRequest, map[string]string{"message": "database and collection are required"})
+	}
+
+	guard := newOperatorGuard(d.settings)
+	var explainTarget bson.D
+	switch er.QueryType {
+	case "aggregate":
+		pipeline, err := parsePipeline(er.QueryText)
+		if err != nil {
+			return sendJSON(sender, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		}
+		if err := guard.checkPipeline(pipeline); err != nil {
+			return sendJSON(sender, http.StatusForbidden, map[string]string{"message": err.Error()})
+		}
+		explainTarget = bson.D{
+			{Key: "aggregate", Value: er.Collection},
+			{Key: "pipeline", Value: pipeline},
+			{Key: "cursor", Value: bson.D{}},
+		}
+	case "find", "":
+		filter, err := parseDocument(er.QueryText)
+		if err != nil {
+			return sendJSON(sender, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		}
+		if err := guard.checkDoc(filter); err != nil {
+			return sendJSON(sender, http.StatusForbidden, map[string]string{"message": err.Error()})
+		}
+		explainTarget = bson.D{
+			{Key: "find", Value: er.Collection},
+			{Key: "filter", Value: filter},
+		}
+	default:
+		return sendJSON(sender, http.StatusBadRequest, map[string]string{"message": "explain only supports aggregate and find queries"})
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(d.settings.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	cmd := bson.D{{Key: "explain", Value: explainTarget}, {Key: "verbosity", Value: "queryPlanner"}}
+	var plan bson.M
+	if err := d.client.Database(dbName).RunCommand(ctx, cmd).Decode(&plan); err != nil {
+		return sendJSON(sender, http.StatusInternalServerError, map[string]string{"message": err.Error()})
+	}
+	return sendJSON(sender, http.StatusOK, plan)
 }
 
 func (d *Datasource) handleDatabases(ctx context.Context, sender backend.CallResourceResponseSender) error {

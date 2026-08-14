@@ -13,6 +13,15 @@ Query and visualize MongoDB data in Grafana. Write aggregation pipelines, find f
 | Query timeout     | Maximum execution time per query in seconds (default 30).                                                |
 | Username/Password | Optional authentication. The password is stored encrypted and never leaves the backend.                  |
 
+## Query safety
+
+Two settings guard against a careless or malicious query, independent of the MongoDB user's own permissions:
+
+- **Max documents** caps how many documents a find or aggregate query can return — enforced server-side (`SetLimit` on find, a trailing `$limit` stage on aggregate) regardless of what a query or panel requests. Defaults to 10000; a negative value disables it.
+- **Operator/command safety** rejects a small denylist before it ever reaches MongoDB: the pipeline/filter operators `$out`, `$merge` (which can turn this nominally read-only datasource into a write path), `$where`, `$function`, `$accumulator` (arbitrary server-side JavaScript execution), and the admin commands `dropDatabase`, `shutdown`, `eval` for the Command query type. Add extra entries in the datasource config, or turn the check off entirely for datasources that intentionally need one of them (e.g. `$merge` for materialized views).
+
+As always, the strongest guarantee is granting the MongoDB user in the connection string read-only roles at the database level — these settings are a backstop, not a substitute.
+
 ## Query types
 
 - **Aggregate** (recommended) — a full aggregation pipeline as an extended JSON array. This is the most powerful option: `$match`, `$group`, `$project`, `$lookup`, `$bucket`, window functions — anything the server supports.
@@ -20,6 +29,8 @@ Query and visualize MongoDB data in Grafana. Write aggregation pipelines, find f
 - **Count** — count of documents matching a filter.
 - **Distinct** — distinct values of a field, optionally filtered.
 - **Command** — a raw database command document (`runCommand`), as an escape hatch.
+
+Aggregate and Find queries have an **Explain** button that runs MongoDB's `explain` command and shows the query plan in a modal. Time macros are not substituted for Explain, since there's no dashboard time range at that point — use literal values, or check the post-macro query the panel inspector's JSON tab shows under `meta.executedQueryString` after running the query for real.
 
 ## Time macros
 

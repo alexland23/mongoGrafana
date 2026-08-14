@@ -104,3 +104,80 @@ func TestCallResourceUnknownPath(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, sender.resp.Status)
 	}
 }
+
+// explainRequestJSON marshals an explainRequest to a resource request body,
+// failing the test on error rather than returning one, since every caller
+// here is constructing a fixed, known-good literal.
+func explainRequestJSON(t *testing.T, er explainRequest) []byte {
+	t.Helper()
+	body, err := json.Marshal(er)
+	if err != nil {
+		t.Fatalf("marshal explainRequest: %v", err)
+	}
+	return body
+}
+
+func TestHandleExplainWorksEvenWhenSchemaDiscoveryDisabled(t *testing.T) {
+	// Explain doesn't list databases/collections/fields, so it isn't gated
+	// behind SchemaDiscoveryEnabled the way the other resource endpoints are.
+	// This case fails past that gate (missing collection) rather than
+	// reaching the Mongo client, so it doesn't need a real connection.
+	d := &Datasource{settings: &models.PluginSettings{SchemaDiscoveryEnabled: false, Database: "sampledb"}}
+	sender := &fakeResourceSender{}
+
+	body := explainRequestJSON(t, explainRequest{QueryType: "find", Database: "sampledb", QueryText: "{}"})
+	err := d.CallResource(context.Background(), &backend.CallResourceRequest{Path: "explain", URL: "/explain", Body: body}, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sender.resp.Status != http.StatusBadRequest {
+		t.Errorf("expected status %d for missing collection, got %d", http.StatusBadRequest, sender.resp.Status)
+	}
+}
+
+func TestHandleExplainRejectsUnsupportedQueryType(t *testing.T) {
+	d := &Datasource{settings: &models.PluginSettings{Database: "sampledb"}}
+	sender := &fakeResourceSender{}
+
+	body := explainRequestJSON(t, explainRequest{QueryType: "distinct", Database: "sampledb", Collection: "metrics"})
+	err := d.CallResource(context.Background(), &backend.CallResourceRequest{Path: "explain", URL: "/explain", Body: body}, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sender.resp.Status != http.StatusBadRequest {
+		t.Errorf("expected status %d for unsupported query type, got %d", http.StatusBadRequest, sender.resp.Status)
+	}
+}
+
+func TestHandleExplainRejectsBlockedOperator(t *testing.T) {
+	d := &Datasource{settings: &models.PluginSettings{Database: "sampledb"}}
+	sender := &fakeResourceSender{}
+
+	body := explainRequestJSON(t, explainRequest{
+		QueryType:  "aggregate",
+		Database:   "sampledb",
+		Collection: "metrics",
+		QueryText:  `[{"$out": "other"}]`,
+	})
+	err := d.CallResource(context.Background(), &backend.CallResourceRequest{Path: "explain", URL: "/explain", Body: body}, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sender.resp.Status != http.StatusForbidden {
+		t.Errorf("expected status %d for blocked operator, got %d", http.StatusForbidden, sender.resp.Status)
+	}
+}
+
+func TestHandleExplainRejectsInvalidQueryText(t *testing.T) {
+	d := &Datasource{settings: &models.PluginSettings{Database: "sampledb"}}
+	sender := &fakeResourceSender{}
+
+	body := explainRequestJSON(t, explainRequest{QueryType: "find", Database: "sampledb", Collection: "metrics", QueryText: "not json"})
+	err := d.CallResource(context.Background(), &backend.CallResourceRequest{Path: "explain", URL: "/explain", Body: body}, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sender.resp.Status != http.StatusBadRequest {
+		t.Errorf("expected status %d for invalid query text, got %d", http.StatusBadRequest, sender.resp.Status)
+	}
+}

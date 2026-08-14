@@ -1,5 +1,7 @@
-import React, { ChangeEvent, useCallback, useEffect, useRef } from 'react';
+import React, { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
+  Button,
   CodeEditor,
   Combobox,
   ComboboxOption,
@@ -7,6 +9,7 @@ import {
   InlineFieldRow,
   InlineSwitch,
   Input,
+  Modal,
   RadioButtonGroup,
 } from '@grafana/ui';
 import { QueryEditorProps, SelectableValue } from '@grafana/data';
@@ -46,6 +49,11 @@ const toOptions = (values: string[]): Array<ComboboxOption<string>> => values.ma
 const isLiveEligible = (queryType: QueryType): boolean =>
   queryType === 'find' || queryType === 'count' || queryType === 'distinct';
 
+// Explain reuses the backend's parseDocument/parsePipeline, which only understand a plain filter
+// document ("find") or an aggregation pipeline ("aggregate") -- not "count"/"distinct" (bare
+// filters with no query plan of their own) or "command" (arbitrary, not necessarily explainable).
+const isExplainEligible = (queryType: QueryType): boolean => queryType === 'aggregate' || queryType === 'find';
+
 const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
   { label: 'Code', value: 'code' },
   { label: 'Builder', value: 'builder' },
@@ -82,6 +90,26 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   const onQueryTextChange = (value: string) => {
     onChange({ ...query, queryText: value });
     onRunQuery();
+  };
+
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainResult, setExplainResult] = useState<string | null>(null);
+  const [explainError, setExplainError] = useState<string | null>(null);
+
+  const onExplain = async () => {
+    setExplainOpen(true);
+    setExplainLoading(true);
+    setExplainError(null);
+    setExplainResult(null);
+    try {
+      const plan = await datasource.explainQuery(query);
+      setExplainResult(JSON.stringify(plan, null, 2));
+    } catch (e) {
+      setExplainError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExplainLoading(false);
+    }
   };
 
   // Async Comboboxes (unlike the static ones above) run their own state
@@ -366,6 +394,40 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
           </InlineField>
         </InlineFieldRow>
       )}
+
+      {isExplainEligible(queryType) && editorMode !== 'builder' && (
+        <InlineFieldRow>
+          <Button
+            icon="info-circle"
+            variant="secondary"
+            size="sm"
+            onClick={onExplain}
+            tooltip="Show the MongoDB query plan for this query. Dashboard time macros are not substituted."
+          >
+            Explain
+          </Button>
+        </InlineFieldRow>
+      )}
+
+      <Modal title="Query plan" isOpen={explainOpen} onDismiss={() => setExplainOpen(false)}>
+        {explainLoading && <div>Running explain…</div>}
+        {explainError && (
+          <Alert title="Explain failed" severity="error">
+            {explainError}
+          </Alert>
+        )}
+        {explainResult && (
+          <CodeEditor
+            language="json"
+            value={explainResult}
+            height={400}
+            showMiniMap={false}
+            showLineNumbers
+            readOnly
+            monacoOptions={{ fontSize: 12, scrollBeyondLastLine: false }}
+          />
+        )}
+      </Modal>
     </>
   );
 }
