@@ -198,19 +198,40 @@ func isChangeStreamUnsupported(err error) bool {
 	return strings.Contains(err.Error(), "$changeStream")
 }
 
-// prefixFilterKeys rewrites a filter's top-level field keys (leaving
-// operators like $or untouched) so it can match a change stream event's
+// prefixFilterKeys rewrites a filter's field keys (recursing into logical
+// operators like $or/$and/$nor) so it can match a change stream event's
 // fullDocument instead of the document itself.
 func prefixFilterKeys(filter bson.D, prefix string) bson.D {
 	prefixed := make(bson.D, 0, len(filter))
 	for _, e := range filter {
 		key := e.Key
+		switch key {
+		case "$or", "$and", "$nor":
+			if arr, ok := e.Value.(bson.A); ok {
+				prefixed = append(prefixed, bson.E{Key: key, Value: prefixFilterArray(arr, prefix)})
+				continue
+			}
+		}
 		if !strings.HasPrefix(key, "$") {
 			key = prefix + key
 		}
 		prefixed = append(prefixed, bson.E{Key: key, Value: e.Value})
 	}
 	return prefixed
+}
+
+// prefixFilterArray applies prefixFilterKeys to each sub-document of a
+// $or/$and/$nor operator's array value.
+func prefixFilterArray(arr bson.A, prefix string) bson.A {
+	prefixedArr := make(bson.A, 0, len(arr))
+	for _, item := range arr {
+		if sub, ok := item.(bson.D); ok {
+			prefixedArr = append(prefixedArr, prefixFilterKeys(sub, prefix))
+		} else {
+			prefixedArr = append(prefixedArr, item)
+		}
+	}
+	return prefixedArr
 }
 
 // idOf returns a document's _id value, or nil if absent.

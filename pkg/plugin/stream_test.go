@@ -18,10 +18,50 @@ func TestPrefixFilterKeys(t *testing.T) {
 	got := prefixFilterKeys(filter, "fullDocument.")
 	want := bson.D{
 		{Key: "fullDocument.level", Value: "error"},
-		{Key: "$or", Value: bson.A{bson.D{{Key: "service", Value: "api"}}}},
+		{Key: "$or", Value: bson.A{bson.D{{Key: "fullDocument.service", Value: "api"}}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("prefixFilterKeys() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPrefixFilterKeysNestedLogicalOperators(t *testing.T) {
+	filter := bson.D{
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "level", Value: "error"}},
+			bson.D{{Key: "level", Value: "warn"}},
+		}},
+	}
+	got := prefixFilterKeys(filter, "fullDocument.")
+	want := bson.D{
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "fullDocument.level", Value: "error"}},
+			bson.D{{Key: "fullDocument.level", Value: "warn"}},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("prefixFilterKeys() = %#v, want %#v", got, want)
+	}
+
+	nested := bson.D{
+		{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$or", Value: bson.A{
+				bson.D{{Key: "level", Value: "error"}},
+			}}},
+			bson.D{{Key: "service", Value: "api"}},
+		}},
+	}
+	got = prefixFilterKeys(nested, "fullDocument.")
+	want = bson.D{
+		{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$or", Value: bson.A{
+				bson.D{{Key: "fullDocument.level", Value: "error"}},
+			}}},
+			bson.D{{Key: "fullDocument.service", Value: "api"}},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("prefixFilterKeys() nested = %#v, want %#v", got, want)
 	}
 }
 
