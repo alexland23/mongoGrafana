@@ -1,7 +1,20 @@
 import React, { ChangeEvent } from 'react';
-import { Field, FieldSet, Input, SecretInput, SecretTextArea, Select, Switch, TagsInput } from '@grafana/ui';
+import {
+  Button,
+  Field,
+  FieldSet,
+  IconButton,
+  InlineField,
+  InlineFieldRow,
+  Input,
+  SecretInput,
+  SecretTextArea,
+  Select,
+  Switch,
+  TagsInput,
+} from '@grafana/ui';
 import { DataSourcePluginOptionsEditorProps, SelectableValue } from '@grafana/data';
-import { MongoDataSourceOptions, MongoSecureJsonData } from '../types';
+import { DerivedFieldConfig, MongoDataSourceOptions, MongoSecureJsonData } from '../types';
 
 interface Props extends DataSourcePluginOptionsEditorProps<MongoDataSourceOptions, MongoSecureJsonData> {}
 
@@ -47,6 +60,31 @@ export function ConfigEditor(props: Props) {
         collectionFilters: tags,
       },
     });
+  };
+
+  const onDerivedFieldsChange = (derivedFields: DerivedFieldConfig[]) => {
+    onOptionsChange({
+      ...options,
+      jsonData: {
+        ...jsonData,
+        derivedFields,
+      },
+    });
+  };
+
+  const onDerivedFieldChange =
+    (index: number, key: keyof DerivedFieldConfig) => (event: ChangeEvent<HTMLInputElement>) => {
+      const derivedFields = [...(jsonData.derivedFields || [])];
+      derivedFields[index] = { ...derivedFields[index], [key]: event.target.value };
+      onDerivedFieldsChange(derivedFields);
+    };
+
+  const onAddDerivedField = () => {
+    onDerivedFieldsChange([...(jsonData.derivedFields || []), { matcherRegex: '', name: '', url: '', urlDisplayLabel: '' }]);
+  };
+
+  const onRemoveDerivedField = (index: number) => () => {
+    onDerivedFieldsChange((jsonData.derivedFields || []).filter((_, i) => i !== index));
   };
 
   const onReadPreferenceChange = (option: SelectableValue<string> | null) => {
@@ -317,6 +355,62 @@ export function ConfigEditor(props: Props) {
             />
           </Field>
         )}
+      </FieldSet>
+
+      <FieldSet label="Derived fields (logs)">
+        <Field description="Extract extra clickable link columns out of &quot;logs&quot; format results, e.g. pulling a trace ID out of the message field and linking it to a tracing UI. The regex is matched against each row's message text; the first capture group becomes the link value.">
+          <>
+            {(jsonData.derivedFields || []).map((derivedField, index) => (
+              <InlineFieldRow key={index}>
+                <InlineField label="Regex" labelWidth={10} tooltip="Matched against the message field, e.g. trace_id=(\w+)">
+                  <Input
+                    id={`config-editor-derived-field-regex-${index}`}
+                    value={derivedField.matcherRegex}
+                    placeholder="trace_id=(\w+)"
+                    width={24}
+                    onChange={onDerivedFieldChange(index, 'matcherRegex')}
+                  />
+                </InlineField>
+                <InlineField label="Field name" labelWidth={12}>
+                  <Input
+                    id={`config-editor-derived-field-name-${index}`}
+                    value={derivedField.name}
+                    placeholder="traceID"
+                    width={16}
+                    onChange={onDerivedFieldChange(index, 'name')}
+                  />
+                </InlineField>
+                <InlineField label="URL" labelWidth={6} tooltip="Supports the ${__value.raw} variable.">
+                  <Input
+                    id={`config-editor-derived-field-url-${index}`}
+                    value={derivedField.url}
+                    placeholder="https://tracing.example/trace/${__value.raw}"
+                    width={40}
+                    onChange={onDerivedFieldChange(index, 'url')}
+                  />
+                </InlineField>
+                <InlineField label="Link label" labelWidth={10}>
+                  <Input
+                    id={`config-editor-derived-field-label-${index}`}
+                    value={derivedField.urlDisplayLabel || ''}
+                    placeholder="Trace view"
+                    width={16}
+                    onChange={onDerivedFieldChange(index, 'urlDisplayLabel')}
+                  />
+                </InlineField>
+                <IconButton
+                  name="trash-alt"
+                  aria-label="Remove derived field"
+                  tooltip="Remove derived field"
+                  onClick={onRemoveDerivedField(index)}
+                />
+              </InlineFieldRow>
+            ))}
+            <Button icon="plus" variant="secondary" size="sm" onClick={onAddDerivedField}>
+              Add derived field
+            </Button>
+          </>
+        </Field>
       </FieldSet>
     </>
   );

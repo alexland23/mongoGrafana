@@ -129,6 +129,13 @@ type queryModel struct {
 	Limit      int64  `json:"limit"`      // find only, 0 = no limit
 	Skip       int64  `json:"skip"`       // find only
 	Format     string `json:"format"`     // table | timeseries | logs
+
+	// MessageField/LevelField rename the given document field to the
+	// canonical "message"/"level" column the logs visualization looks for
+	// by convention. Only applies when Format is "logs"; empty leaves
+	// columns as-is.
+	MessageField string `json:"messageField"`
+	LevelField   string `json:"levelField"`
 }
 
 // interpolateMacros replaces Grafana time macros inside the raw query text

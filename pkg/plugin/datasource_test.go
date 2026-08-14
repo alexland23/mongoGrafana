@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alandave/mongo-db/pkg/models"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -288,5 +289,27 @@ func TestDocsToFrameTimeSeries(t *testing.T) {
 	}
 	if frame.Rows() != 3 {
 		t.Fatalf("expected 3 rows, got %d", frame.Rows())
+	}
+}
+
+// TestCompileDerivedFieldsSkipsInvalidEntries covers the "a bad rule
+// shouldn't break every other derived field, let alone datasource startup"
+// contract compileDerivedFields relies on: entries missing a name/URL, or
+// whose regex fails to compile, are silently dropped rather than causing
+// NewDatasource to fail.
+func TestCompileDerivedFieldsSkipsInvalidEntries(t *testing.T) {
+	configs := []models.DerivedFieldConfig{
+		{Name: "traceID", MatcherRegex: `trace_id=(\w+)`, URL: "https://tracing.example/trace/${__value.raw}"},
+		{Name: "", MatcherRegex: `x=(\w+)`, URL: "https://example.org"},
+		{Name: "badRegex", MatcherRegex: `trace_id=(\w+`, URL: "https://example.org"},
+		{Name: "noURL", MatcherRegex: `x=(\w+)`, URL: ""},
+	}
+
+	got := compileDerivedFields(configs)
+	if len(got) != 1 {
+		t.Fatalf("compileDerivedFields() = %d fields, want 1: %#v", len(got), got)
+	}
+	if got[0].name != "traceID" {
+		t.Errorf("compileDerivedFields()[0].name = %q, want traceID", got[0].name)
 	}
 }

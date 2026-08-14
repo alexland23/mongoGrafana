@@ -108,7 +108,7 @@ func TestIsChangeStreamUnsupported(t *testing.T) {
 
 func TestParseStreamQueryRequiresDatabaseAndCollection(t *testing.T) {
 	d := &Datasource{settings: &models.PluginSettings{}}
-	if _, _, err := d.parseStreamQuery([]byte(`{"collection":"logs"}`)); err == nil {
+	if _, _, _, err := d.parseStreamQuery([]byte(`{"collection":"logs"}`)); err == nil {
 		t.Errorf("expected error when no database is configured")
 	}
 }

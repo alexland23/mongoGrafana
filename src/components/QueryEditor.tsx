@@ -70,7 +70,8 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   };
 
   const onTextInput =
-    (key: 'collection' | 'database' | 'field' | 'projection' | 'sort') => (event: ChangeEvent<HTMLInputElement>) => {
+    (key: 'collection' | 'database' | 'field' | 'projection' | 'sort' | 'messageField' | 'levelField') =>
+    (event: ChangeEvent<HTMLInputElement>) => {
       onChange({ ...query, [key]: event.target.value });
     };
 
@@ -231,6 +232,39 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
           )}
         </InlineField>
       </InlineFieldRow>
+
+      {query.format === 'logs' && (
+        <InlineFieldRow>
+          <InlineField
+            label="Message field"
+            labelWidth={14}
+            tooltip='Document field to treat as the log line. Blank uses the "message" convention.'
+          >
+            <Input
+              id="query-editor-message-field"
+              value={query.messageField || ''}
+              placeholder="message"
+              width={20}
+              onChange={onTextInput('messageField')}
+              onBlur={onRunQuery}
+            />
+          </InlineField>
+          <InlineField
+            label="Level field"
+            labelWidth={12}
+            tooltip='Document field to treat as the log level. Blank uses the "level" convention.'
+          >
+            <Input
+              id="query-editor-level-field"
+              value={query.levelField || ''}
+              placeholder="level"
+              width={20}
+              onChange={onTextInput('levelField')}
+              onBlur={onRunQuery}
+            />
+          </InlineField>
+        </InlineFieldRow>
+      )}
 
       {queryType === 'distinct' && (
         <InlineFieldRow>

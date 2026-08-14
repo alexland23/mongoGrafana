@@ -95,6 +95,10 @@ export interface MongoQuery extends DataQuery {
   builder?: QueryBuilderState;
   /** Tail the collection over Grafana Live instead of running a one-shot query. Only applies to "logs" format. */
   liveStreaming?: boolean;
+  /** Document field to treat as the log line. Only applies to "logs" format; blank keeps the "message" convention. */
+  messageField?: string;
+  /** Document field to treat as the log level. Only applies to "logs" format; blank keeps the "level" convention. */
+  levelField?: string;
 }
 
 export const DEFAULT_QUERY: Partial<MongoQuery> = {
@@ -154,6 +158,24 @@ export interface MongoDataSourceOptions extends DataSourceJsonData {
    * patterns allow them. No patterns means everything is allowed.
    */
   collectionFilters?: string[];
+  /**
+   * Extra clickable link columns derived from "logs" format results, e.g. pulling a trace ID out of
+   * the message field and linking it to a tracing UI.
+   */
+  derivedFields?: DerivedFieldConfig[];
+}
+
+/**
+ * One derived link field applied to logs results. matcherRegex is evaluated against each row's
+ * message text; the first capture group becomes the field's value (or the whole match if the
+ * pattern has no capture group). url supports the standard Grafana data link variable
+ * `${__value.raw}`.
+ */
+export interface DerivedFieldConfig {
+  matcherRegex: string;
+  name: string;
+  url: string;
+  urlDisplayLabel?: string;
 }
 
 /**
