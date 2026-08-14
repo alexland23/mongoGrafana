@@ -1,4 +1,5 @@
 import { merge, Observable, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 
 import {
   AnnotationQuery,
@@ -9,9 +10,10 @@ import {
   DataSourceInstanceSettings,
   DataSourceVariableSupport,
   LiveChannelScope,
+  LoadingState,
   ScopedVars,
 } from '@grafana/data';
-import { DataSourceWithBackend, getGrafanaLiveSrv, getTemplateSrv } from '@grafana/runtime';
+import { DataSourceWithBackend, getGrafanaLiveSrv, getTemplateSrv, toDataQueryError } from '@grafana/runtime';
 
 import { DEFAULT_ANNOTATION_QUERY, DEFAULT_QUERY, MongoDataSourceOptions, MongoQuery } from './types';
 
@@ -90,15 +92,25 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
 
     const responses: Array<Observable<DataQueryResponse>> = liveTargets.map((target) => {
       const resolved = this.applyTemplateVariables(target, request.scopedVars);
-      return getGrafanaLiveSrv().getDataStream({
-        key: `${request.requestId}-${resolved.refId}`,
-        addr: {
-          scope: LiveChannelScope.DataSource,
-          stream: this.uid,
-          path: liveChannelPath(resolved),
-          data: resolved,
-        },
-      });
+      return getGrafanaLiveSrv()
+        .getDataStream({
+          key: `${request.requestId}-${resolved.refId}`,
+          addr: {
+            scope: LiveChannelScope.DataSource,
+            stream: this.uid,
+            path: liveChannelPath(resolved),
+            data: resolved,
+          },
+        })
+        .pipe(
+          catchError((err) => {
+            // Native Error objects hold `message` as a non-enumerable own property, so it must be
+            // read explicitly rather than spread into the response's error object.
+            const error = toDataQueryError(err);
+            error.refId = resolved.refId;
+            return of({ data: [], state: LoadingState.Error, error });
+          })
+        );
     });
 
     if (normalTargets.length > 0) {
