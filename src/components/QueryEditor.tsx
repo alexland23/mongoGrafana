@@ -1,8 +1,9 @@
 import React, { ChangeEvent, useCallback, useEffect, useRef } from 'react';
-import { CodeEditor, Combobox, ComboboxOption, InlineField, InlineFieldRow, Input } from '@grafana/ui';
-import { QueryEditorProps } from '@grafana/data';
+import { CodeEditor, Combobox, ComboboxOption, InlineField, InlineFieldRow, Input, RadioButtonGroup } from '@grafana/ui';
+import { QueryEditorProps, SelectableValue } from '@grafana/data';
 import { DataSource } from '../datasource';
-import { MongoDataSourceOptions, MongoQuery, QueryFormat, QueryType } from '../types';
+import { EditorMode, MongoDataSourceOptions, MongoQuery, QueryFormat, QueryType } from '../types';
+import { QueryBuilder } from './QueryBuilder';
 
 type Props = QueryEditorProps<DataSource, MongoQuery, MongoDataSourceOptions>;
 
@@ -30,9 +31,21 @@ const EDITOR_LABEL: Record<QueryType, string> = {
 
 const toOptions = (values: string[]): Array<ComboboxOption<string>> => values.map((v) => ({ label: v, value: v }));
 
+const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
+  { label: 'Code', value: 'code' },
+  { label: 'Builder', value: 'builder' },
+];
+
 export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) {
   const queryType = query.queryType ?? 'aggregate';
+  const editorMode = query.editorMode ?? 'code';
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
+
+  const onEditorModeChange = (mode: EditorMode) => {
+    // Builder state only compiles to an aggregation pipeline; switching in forces that query type.
+    onChange({ ...query, editorMode: mode, queryType: mode === 'builder' ? 'aggregate' : query.queryType });
+    onRunQuery();
+  };
 
   const onTextInput =
     (key: 'collection' | 'database' | 'field' | 'projection' | 'sort') => (event: ChangeEvent<HTMLInputElement>) => {
@@ -102,10 +115,16 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             value={queryType}
             width={24}
             onChange={(v) => {
-              onChange({ ...query, queryType: v.value });
+              // Builder state only compiles to an aggregation pipeline; leaving "aggregate" drops back to Code.
+              onChange({ ...query, queryType: v.value, editorMode: v.value === 'aggregate' ? query.editorMode : 'code' });
             }}
           />
         </InlineField>
+        {queryType === 'aggregate' && (
+          <InlineField label="Editor" labelWidth={10}>
+            <RadioButtonGroup options={EDITOR_MODES} value={editorMode} onChange={(v) => onEditorModeChange(v ?? 'code')} />
+          </InlineField>
+        )}
         {queryType !== 'command' && (
           <InlineField label="Collection" labelWidth={12} tooltip="Collection to query. Supports dashboard variables.">
             {discoveryEnabled ? (
@@ -250,25 +269,29 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         </InlineFieldRow>
       )}
 
-      <InlineFieldRow>
-        <InlineField
-          label={EDITOR_LABEL[queryType]}
-          labelWidth={30}
-          grow
-          tooltip="MongoDB extended JSON. Macros: $__timeFrom, $__timeTo, $__timeFrom_ms, $__timeTo_ms, $__interval_ms, $__maxDataPoints. Dashboard variables like $variable are supported. Press Cmd/Ctrl+S or blur the editor to run."
-        >
-          <CodeEditor
-            language="json"
-            value={query.queryText || ''}
-            height={200}
-            showMiniMap={false}
-            showLineNumbers
-            onBlur={onQueryTextChange}
-            onSave={onQueryTextChange}
-            monacoOptions={{ fontSize: 13, scrollBeyondLastLine: false }}
-          />
-        </InlineField>
-      </InlineFieldRow>
+      {queryType === 'aggregate' && editorMode === 'builder' ? (
+        <QueryBuilder query={query} onChange={onChange} onRunQuery={onRunQuery} />
+      ) : (
+        <InlineFieldRow>
+          <InlineField
+            label={EDITOR_LABEL[queryType]}
+            labelWidth={30}
+            grow
+            tooltip="MongoDB extended JSON. Macros: $__timeFrom, $__timeTo, $__timeFrom_ms, $__timeTo_ms, $__interval_ms, $__maxDataPoints. Dashboard variables like $variable are supported. Press Cmd/Ctrl+S or blur the editor to run."
+          >
+            <CodeEditor
+              language="json"
+              value={query.queryText || ''}
+              height={200}
+              showMiniMap={false}
+              showLineNumbers
+              onBlur={onQueryTextChange}
+              onSave={onQueryTextChange}
+              monacoOptions={{ fontSize: 13, scrollBeyondLastLine: false }}
+            />
+          </InlineField>
+        </InlineFieldRow>
+      )}
     </>
   );
 }

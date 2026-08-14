@@ -4,6 +4,70 @@ import { DataQuery } from '@grafana/schema';
 export type QueryType = 'aggregate' | 'find' | 'count' | 'distinct' | 'command';
 export type QueryFormat = 'table' | 'timeseries' | 'logs';
 
+/** Code = free-form Monaco editor; Builder = visual pipeline construction (aggregate only). */
+export type EditorMode = 'code' | 'builder';
+
+export type FilterOperator = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'nin' | 'exists' | 'regex';
+
+export interface BuilderFilter {
+  field: string;
+  operator: FilterOperator;
+  /** Raw text value; parsed as JSON when possible (numbers, booleans, quoted strings), else used as a plain string. */
+  value: string;
+}
+
+export type AggregationOp = 'sum' | 'avg' | 'min' | 'max' | 'count';
+
+export interface BuilderAggregation {
+  op: AggregationOp;
+  /** Field to aggregate; unused for "count". */
+  field?: string;
+  /** Output field name. */
+  as: string;
+}
+
+export interface BuilderSort {
+  field: string;
+  direction: 'asc' | 'desc';
+}
+
+export interface BuilderGroupBy {
+  enabled: boolean;
+  /** BSON date field bucketed via the $__timeGroup macro. */
+  timeField: string;
+  /** Bucket size, e.g. "10m"; blank uses the dashboard's suggested interval. */
+  interval?: string;
+  /** Optional extra field to group by alongside the time bucket, e.g. "host". */
+  labelField?: string;
+  aggregations: BuilderAggregation[];
+}
+
+/** Visual editor state for "Builder" mode; compiled into an aggregation pipeline shown in the code editor. */
+export interface QueryBuilderState {
+  timeFilterEnabled: boolean;
+  /** BSON date field matched via the $__timeFilter macro. */
+  timeField: string;
+  filters: BuilderFilter[];
+  groupBy: BuilderGroupBy;
+  sort: BuilderSort[];
+  limit?: number;
+}
+
+export const DEFAULT_BUILDER_STATE: QueryBuilderState = {
+  timeFilterEnabled: true,
+  timeField: 'time',
+  filters: [],
+  groupBy: {
+    enabled: false,
+    timeField: 'time',
+    interval: '',
+    labelField: '',
+    aggregations: [],
+  },
+  sort: [],
+  limit: 100,
+};
+
 export interface MongoQuery extends DataQuery {
   /** aggregate | find | count | distinct | command */
   queryType?: QueryType;
@@ -25,6 +89,10 @@ export interface MongoQuery extends DataQuery {
   skip?: number;
   /** How the result should be framed */
   format?: QueryFormat;
+  /** code (default) | builder; builder only applies to aggregate queries */
+  editorMode?: EditorMode;
+  /** Visual editor state, kept alongside queryText so switching back to Builder mode restores it */
+  builder?: QueryBuilderState;
 }
 
 export const DEFAULT_QUERY: Partial<MongoQuery> = {
