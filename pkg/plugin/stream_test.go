@@ -112,3 +112,42 @@ func TestParseStreamQueryRequiresDatabaseAndCollection(t *testing.T) {
 		t.Errorf("expected error when no database is configured")
 	}
 }
+
+func TestFilterAfterID(t *testing.T) {
+	filter := bson.D{{Key: "level", Value: "error"}}
+
+	got := filterAfterID(filter, 42)
+	want := bson.D{
+		{Key: "_id", Value: bson.D{{Key: "$gt", Value: 42}}},
+		{Key: "level", Value: "error"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("filterAfterID() = %#v, want %#v", got, want)
+	}
+
+	if got := filterAfterID(filter, nil); !reflect.DeepEqual(got, filter) {
+		t.Errorf("filterAfterID() with nil id = %#v, want filter unchanged %#v", got, filter)
+	}
+}
+
+// TestStreamBaselineHandoff verifies the SubscribeStream->RunStream
+// coordination this package relies on to close the race between the
+// backlog snapshot and the tail's start point: a baseline recorded for a
+// channel path is delivered to the next reader exactly once.
+func TestStreamBaselineHandoff(t *testing.T) {
+	d := &Datasource{}
+	d.streamBaselines.Store("a/b/c", 42)
+
+	got, ok := d.streamBaselines.LoadAndDelete("a/b/c")
+	if !ok || got != 42 {
+		t.Errorf("LoadAndDelete() = (%v, %v), want (42, true)", got, ok)
+	}
+
+	if _, ok := d.streamBaselines.LoadAndDelete("a/b/c"); ok {
+		t.Errorf("expected baseline to be consumed after the first read")
+	}
+
+	if _, ok := d.streamBaselines.LoadAndDelete("never-stored"); ok {
+		t.Errorf("expected no baseline for a path that was never recorded")
+	}
+}

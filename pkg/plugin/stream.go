@@ -83,6 +83,18 @@ func (d *Datasource) SubscribeStream(ctx context.Context, req *backend.Subscribe
 	}
 	reverseDocs(docs)
 
+	// Record the newest id this backlog covers so RunStream's tail (started
+	// separately, and possibly some time later) can resume exactly from here
+	// instead of independently querying its own "latest" baseline — closing
+	// the gap where a document inserted between the two queries would
+	// otherwise be newer than the backlog but older than the tail's start
+	// point, and so never delivered at all.
+	var maxID any
+	if len(docs) > 0 {
+		maxID = idOf(docs[len(docs)-1])
+	}
+	d.streamBaselines.Store(req.Path, maxID)
+
 	initialData, err := backend.NewInitialFrame(docsToFrame(docs, "logs", "logs"), data.IncludeAll)
 	if err != nil {
 		return nil, err
@@ -104,7 +116,16 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 		return err
 	}
 
-	err = d.watchChangeStream(ctx, coll, filter, sender)
+	// baseline, if present, is the newest _id the triggering SubscribeStream
+	// call's backlog already covered; nil-but-present means the backlog was
+	// empty. Its absence (no entry recorded) means we have no reference
+	// point, e.g. the backlog query itself failed.
+	var baseline *any
+	if v, ok := d.streamBaselines.LoadAndDelete(req.Path); ok {
+		baseline = &v
+	}
+
+	err = d.watchChangeStream(ctx, coll, filter, baseline, sender)
 	if err == nil || ctx.Err() != nil {
 		return err
 	}
@@ -113,12 +134,12 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 	}
 
 	log.DefaultLogger.Info("live tail: change streams unavailable, falling back to polling", "collection", coll.Name(), "error", err)
-	return d.pollCollection(ctx, coll, filter, sender)
+	return d.pollCollection(ctx, coll, filter, baseline, sender)
 }
 
 // watchChangeStream tails inserts via a MongoDB change stream, matching the
 // caller's filter against each new document's fields.
-func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, sender *backend.StreamSender) error {
+func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, sender *backend.StreamSender) error {
 	match := append(bson.D{{Key: "operationType", Value: "insert"}}, prefixFilterKeys(filter, "fullDocument.")...)
 	stream, err := coll.Watch(ctx, mongo.Pipeline{{{Key: "$match", Value: match}}})
 	if err != nil {
@@ -130,6 +151,27 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 		_ = stream.Close(closeCtx)
 	}()
 
+	// The change stream only observes inserts from this point forward, but
+	// it was opened strictly after the backlog snapshot (a separate query,
+	// possibly seconds earlier). Catch up on anything inserted in between,
+	// and remember those ids so the change stream doesn't redeliver them.
+	seen := map[string]struct{}{}
+	if baseline != nil {
+		caughtUp, err := findAfterID(ctx, coll, filter, *baseline)
+		if err != nil {
+			log.DefaultLogger.Warn("live tail: catch-up poll failed", "error", err)
+		} else if len(caughtUp) > 0 {
+			for _, doc := range caughtUp {
+				if id := idOf(doc); id != nil {
+					seen[fmt.Sprint(id)] = struct{}{}
+				}
+			}
+			if err := sender.SendFrame(docsToFrame(caughtUp, "logs", "logs"), data.IncludeAll); err != nil {
+				return err
+			}
+		}
+	}
+
 	for stream.Next(ctx) {
 		var event struct {
 			FullDocument bson.D `bson:"fullDocument"`
@@ -137,6 +179,13 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 		if err := stream.Decode(&event); err != nil {
 			log.DefaultLogger.Error("live tail: failed to decode change event", "error", err)
 			continue
+		}
+		if id := idOf(event.FullDocument); id != nil {
+			key := fmt.Sprint(id)
+			if _, dup := seen[key]; dup {
+				delete(seen, key)
+				continue
+			}
 		}
 		if err := sender.SendFrame(docsToFrame([]bson.D{event.FullDocument}, "logs", "logs"), data.IncludeAll); err != nil {
 			return err
@@ -150,10 +199,19 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 
 // pollCollection re-queries documents with _id greater than the last one
 // seen, sorted ascending, on a fixed interval.
-func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, sender *backend.StreamSender) error {
-	lastID, err := latestID(ctx, coll, filter)
-	if err != nil {
-		return err
+func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, sender *backend.StreamSender) error {
+	var lastID any
+	if baseline != nil {
+		// Resume exactly where the triggering SubscribeStream's backlog left
+		// off, rather than an independently-queried "latest" id that could
+		// already be newer than that backlog and drop documents in between.
+		lastID = *baseline
+	} else {
+		var err error
+		lastID, err = latestID(ctx, coll, filter)
+		if err != nil {
+			return err
+		}
 	}
 
 	ticker := time.NewTicker(pollInterval)
@@ -164,18 +222,9 @@ func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection,
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			pollFilter := filter
-			if lastID != nil {
-				pollFilter = append(bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: lastID}}}}, filter...)
-			}
-			cursor, err := coll.Find(ctx, pollFilter, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+			docs, err := findAfterID(ctx, coll, filter, lastID)
 			if err != nil {
 				log.DefaultLogger.Error("live tail: poll failed", "error", err)
-				continue
-			}
-			var docs []bson.D
-			if err := cursor.All(ctx, &docs); err != nil {
-				log.DefaultLogger.Error("live tail: poll decode failed", "error", err)
 				continue
 			}
 			if len(docs) == 0 {
@@ -232,6 +281,30 @@ func prefixFilterArray(arr bson.A, prefix string) bson.A {
 		}
 	}
 	return prefixedArr
+}
+
+// filterAfterID returns filter augmented with an _id lower bound so only
+// documents newer than id match. If id is nil, filter is returned unchanged
+// since nothing has been delivered yet, so nothing should be excluded.
+func filterAfterID(filter bson.D, id any) bson.D {
+	if id == nil {
+		return filter
+	}
+	return append(bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: id}}}}, filter...)
+}
+
+// findAfterID returns documents matching filter newer than id (all matching
+// documents if id is nil), sorted ascending by _id.
+func findAfterID(ctx context.Context, coll *mongo.Collection, filter bson.D, id any) ([]bson.D, error) {
+	cursor, err := coll.Find(ctx, filterAfterID(filter, id), options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, err
+	}
+	var docs []bson.D
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	return docs, nil
 }
 
 // idOf returns a document's _id value, or nil if absent.

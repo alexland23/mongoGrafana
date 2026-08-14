@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alandave/mongo-db/pkg/models"
@@ -140,6 +141,13 @@ func loadPEMSource(path, content string) ([]byte, error) {
 type Datasource struct {
 	client   *mongo.Client
 	settings *models.PluginSettings
+
+	// streamBaselines holds the newest backlog _id SubscribeStream saw for a
+	// given channel path, so RunStream's tail can pick up exactly where the
+	// backlog left off instead of independently querying its own "latest"
+	// baseline, which would leave a gap for documents inserted between the
+	// two queries. See stream.go.
+	streamBaselines sync.Map // map[string]any
 }
 
 // Dispose cleans up the client when the instance is replaced.
