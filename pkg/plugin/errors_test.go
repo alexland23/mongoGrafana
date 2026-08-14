@@ -27,6 +27,20 @@ func TestClassifyQueryErrorOtherCommandErrorIsBadRequest(t *testing.T) {
 	}
 }
 
+func TestClassifyQueryErrorMaxTimeMSExpiredIsTimeout(t *testing.T) {
+	err := mongo.CommandError{Code: 50, Name: "MaxTimeMSExpired", Message: "operation exceeded time limit"}
+	if got := classifyQueryError(err); got != backend.StatusTimeout {
+		t.Errorf("classifyQueryError(MaxTimeMSExpired) = %v, want StatusTimeout", got)
+	}
+}
+
+func TestClassifyQueryErrorServerSideCommandErrorIsInternal(t *testing.T) {
+	err := mongo.CommandError{Code: 91, Name: "ShutdownInProgress", Message: "server is shutting down"}
+	if got := classifyQueryError(err); got != backend.StatusInternal {
+		t.Errorf("classifyQueryError(ShutdownInProgress) = %v, want StatusInternal", got)
+	}
+}
+
 func TestClassifyQueryErrorLocalValidationErrorIsBadRequest(t *testing.T) {
 	err := fmt.Errorf("filter: %w", fmt.Errorf("invalid extended JSON document: unexpected token"))
 	if got := classifyQueryError(err); got != backend.StatusBadRequest {
