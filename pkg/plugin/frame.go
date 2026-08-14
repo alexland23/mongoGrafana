@@ -60,6 +60,19 @@ func (b *frameBuilder) addDocument(doc bson.D) {
 	}
 }
 
+// resetRows clears a builder's accumulated rows while preserving its
+// established column schema (names, order, types). Reusing a builder across
+// streamed frames this way keeps the schema stable for the life of a live
+// channel instead of rederiving it from scratch per frame, so a field seen
+// on an earlier event but absent from the current one comes through as null
+// rather than vanishing from the frame.
+func (b *frameBuilder) resetRows() {
+	b.rows = 0
+	for _, col := range b.cols {
+		col.vals = col.vals[:0]
+	}
+}
+
 // coerce reconciles a value whose kind differs from the column's kind.
 // Numbers arriving in a string column are stringified; strings arriving in a
 // numeric column promote the whole column to string.
@@ -272,7 +285,20 @@ func (c *column) toField() *data.Field {
 // format: "timeseries" attempts a long-to-wide conversion, "logs" tags the
 // frame for the logs visualization, anything else stays tabular.
 func docsToFrame(docs []bson.D, refID, format string) *data.Frame {
-	b := newFrameBuilder()
+	return buildDocsFrame(newFrameBuilder(), docs, refID, format)
+}
+
+// docsToStreamFrame is docsToFrame but built onto a builder the caller keeps
+// across calls, so the schema (field set/order/types) it establishes stays
+// stable across the many frames sent over a live channel's lifetime instead
+// of being rederived from scratch each call -- important for change-stream
+// events, which are typically converted one document at a time.
+func docsToStreamFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
+	b.resetRows()
+	return buildDocsFrame(b, docs, refID, format)
+}
+
+func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
 	for _, doc := range docs {
 		b.addDocument(doc)
 	}

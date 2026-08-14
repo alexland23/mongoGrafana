@@ -148,6 +148,15 @@ type Datasource struct {
 	// baseline, which would leave a gap for documents inserted between the
 	// two queries. See stream.go.
 	streamBaselines sync.Map // map[string]any
+
+	// streamSchemas holds the frameBuilder SubscribeStream used to build a
+	// channel's initial backlog frame, so RunStream's tail reuses that same
+	// builder for every frame it sends. This keeps the streamed schema
+	// (field set/order/types) stable for the life of the stream instead of
+	// rederiving it from scratch per event, which would otherwise let fields
+	// silently vanish from a frame whenever an event happened to lack them.
+	// See stream.go.
+	streamSchemas sync.Map // map[string]*frameBuilder
 }
 
 // Dispose cleans up the client when the instance is replaced.

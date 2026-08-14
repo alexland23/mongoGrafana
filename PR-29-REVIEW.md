@@ -24,7 +24,7 @@ Findings from `/code-review medium` on `16-live-streaming-log-tailing` (change-s
   Live targets bypass `DataSourceWithBackend`'s `query()` entirely, losing its error surfacing/cancellation handling.
   *Failure:* When `SubscribeStream` rejects (e.g. findings #1/#2) or `RunStream` errors (auth failure, disconnected client), `getGrafanaLiveSrv().getDataStream()` has no equivalent to the base class's populated `DataQueryResponse.error` path — the logs panel just shows stale/no data with no visible error banner, unlike a normal failed query.
 
-- [ ] **6. Streamed frame schema can vary between consecutive events** — `pkg/plugin/frame.go:274`
+- [x] **6. Streamed frame schema can vary between consecutive events** — `pkg/plugin/frame.go:274`
   `docsToFrame` derives each streamed frame's schema independently per call, so consecutive live frames on the same Grafana Live channel can have different field sets/order.
   *Failure:* Heterogeneous log documents (some with an `error`/`stack` field, some without) each produce a single-document frame via `watchChangeStream`'s `docsToFrame([]bson.D{event.FullDocument}, ...)` call. Grafana Live's streaming consumer generally expects a stable schema per channel; a field appearing/disappearing between frames can cause the logs panel to drop data or reset instead of appending rows.
 

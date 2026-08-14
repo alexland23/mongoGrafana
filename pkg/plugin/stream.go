@@ -95,7 +95,14 @@ func (d *Datasource) SubscribeStream(ctx context.Context, req *backend.Subscribe
 	}
 	d.streamBaselines.Store(req.Path, maxID)
 
-	initialData, err := backend.NewInitialFrame(docsToFrame(docs, "logs", "logs"), data.IncludeAll)
+	// Build the initial frame on a builder RunStream will reuse for every
+	// subsequent frame it sends on this channel, so the schema established
+	// here (field set/order/types) stays stable for the life of the stream.
+	builder := newFrameBuilder()
+	initialFrame := docsToStreamFrame(builder, docs, "logs", "logs")
+	d.streamSchemas.Store(req.Path, builder)
+
+	initialData, err := backend.NewInitialFrame(initialFrame, data.IncludeAll)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +132,18 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 		baseline = &v
 	}
 
-	err = d.watchChangeStream(ctx, coll, filter, baseline, sender)
+	// Reuse the builder SubscribeStream seeded from the backlog, if any, so
+	// the schema it established carries through every frame this stream
+	// sends. Absence (e.g. the backlog query itself failed) just means
+	// starting from an empty schema.
+	builder := newFrameBuilder()
+	if v, ok := d.streamSchemas.LoadAndDelete(req.Path); ok {
+		if b, ok := v.(*frameBuilder); ok {
+			builder = b
+		}
+	}
+
+	err = d.watchChangeStream(ctx, coll, filter, baseline, builder, sender)
 	if err == nil || ctx.Err() != nil {
 		return err
 	}
@@ -134,12 +152,12 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 	}
 
 	log.DefaultLogger.Info("live tail: change streams unavailable, falling back to polling", "collection", coll.Name(), "error", err)
-	return d.pollCollection(ctx, coll, filter, baseline, sender)
+	return d.pollCollection(ctx, coll, filter, baseline, builder, sender)
 }
 
 // watchChangeStream tails inserts via a MongoDB change stream, matching the
 // caller's filter against each new document's fields.
-func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, sender *backend.StreamSender) error {
+func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender) error {
 	match := append(bson.D{{Key: "operationType", Value: "insert"}}, prefixFilterKeys(filter, "fullDocument.")...)
 	stream, err := coll.Watch(ctx, mongo.Pipeline{{{Key: "$match", Value: match}}})
 	if err != nil {
@@ -166,7 +184,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 					seen[fmt.Sprint(id)] = struct{}{}
 				}
 			}
-			if err := sender.SendFrame(docsToFrame(caughtUp, "logs", "logs"), data.IncludeAll); err != nil {
+			if err := sender.SendFrame(docsToStreamFrame(builder, caughtUp, "logs", "logs"), data.IncludeAll); err != nil {
 				return err
 			}
 		}
@@ -187,7 +205,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 				continue
 			}
 		}
-		if err := sender.SendFrame(docsToFrame([]bson.D{event.FullDocument}, "logs", "logs"), data.IncludeAll); err != nil {
+		if err := sender.SendFrame(docsToStreamFrame(builder, []bson.D{event.FullDocument}, "logs", "logs"), data.IncludeAll); err != nil {
 			return err
 		}
 	}
@@ -199,7 +217,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 
 // pollCollection re-queries documents with _id greater than the last one
 // seen, sorted ascending, on a fixed interval.
-func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, sender *backend.StreamSender) error {
+func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender) error {
 	var lastID any
 	if baseline != nil {
 		// Resume exactly where the triggering SubscribeStream's backlog left
@@ -231,7 +249,7 @@ func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection,
 				continue
 			}
 			lastID = idOf(docs[len(docs)-1])
-			if err := sender.SendFrame(docsToFrame(docs, "logs", "logs"), data.IncludeAll); err != nil {
+			if err := sender.SendFrame(docsToStreamFrame(builder, docs, "logs", "logs"), data.IncludeAll); err != nil {
 				return err
 			}
 		}
