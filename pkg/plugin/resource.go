@@ -201,7 +201,7 @@ func (d *Datasource) handleFields(ctx context.Context, sender backend.CallResour
 	seen := map[string]struct{}{}
 	for _, doc := range docs {
 		var flat []bson.E
-		flattenDoc("", doc, &flat, map[string]int{})
+		flattenDoc("", doc, &flat, map[string]int{}, 0, 0)
 		for _, e := range flat {
 			seen[e.Key] = struct{}{}
 		}

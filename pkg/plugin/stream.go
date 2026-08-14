@@ -102,7 +102,7 @@ func (d *Datasource) SubscribeStream(ctx context.Context, req *backend.Subscribe
 	// subsequent frame it sends on this channel, so the schema established
 	// here (field set/order/types) stays stable for the life of the stream.
 	builder := newFrameBuilder()
-	initialFrame := docsToStreamFrameWithLogOptions(builder, docs, "logs", "logs", d.logFieldOptionsFor(qm))
+	initialFrame := docsToStreamFrameWithLogOptions(builder, docs, "logs", "logs", d.frameOptionsFor(qm))
 	d.streamSchemas.Store(req.Path, builder)
 
 	initialData, err := backend.NewInitialFrame(initialFrame, data.IncludeAll)
@@ -125,7 +125,7 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 	if err != nil {
 		return err
 	}
-	logOpts := d.logFieldOptionsFor(qm)
+	frameOpts := d.frameOptionsFor(qm)
 
 	// baseline, if present, is the newest _id the triggering SubscribeStream
 	// call's backlog already covered; nil-but-present means the backlog was
@@ -147,7 +147,7 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 		}
 	}
 
-	err = d.watchChangeStream(ctx, coll, filter, baseline, builder, sender, logOpts)
+	err = d.watchChangeStream(ctx, coll, filter, baseline, builder, sender, frameOpts)
 	if err == nil || ctx.Err() != nil {
 		return err
 	}
@@ -156,12 +156,12 @@ func (d *Datasource) RunStream(ctx context.Context, req *backend.RunStreamReques
 	}
 
 	log.DefaultLogger.Info("live tail: change streams unavailable, falling back to polling", "collection", coll.Name(), "error", err)
-	return d.pollCollection(ctx, coll, filter, baseline, builder, sender, logOpts)
+	return d.pollCollection(ctx, coll, filter, baseline, builder, sender, frameOpts)
 }
 
 // watchChangeStream tails inserts via a MongoDB change stream, matching the
 // caller's filter against each new document's fields.
-func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender, logOpts logFieldOptions) error {
+func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender, frameOpts frameOptions) error {
 	match := append(bson.D{{Key: "operationType", Value: "insert"}}, prefixFilterKeys(filter, "fullDocument.")...)
 	stream, err := coll.Watch(ctx, mongo.Pipeline{{{Key: "$match", Value: match}}})
 	if err != nil {
@@ -188,7 +188,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 					seen[fmt.Sprint(id)] = struct{}{}
 				}
 			}
-			if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, caughtUp, "logs", "logs", logOpts), data.IncludeAll); err != nil {
+			if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, caughtUp, "logs", "logs", frameOpts), data.IncludeAll); err != nil {
 				return err
 			}
 		}
@@ -209,7 +209,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 				continue
 			}
 		}
-		if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, []bson.D{event.FullDocument}, "logs", "logs", logOpts), data.IncludeAll); err != nil {
+		if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, []bson.D{event.FullDocument}, "logs", "logs", frameOpts), data.IncludeAll); err != nil {
 			return err
 		}
 	}
@@ -221,7 +221,7 @@ func (d *Datasource) watchChangeStream(ctx context.Context, coll *mongo.Collecti
 
 // pollCollection re-queries documents with _id greater than the last one
 // seen, sorted ascending, on a fixed interval.
-func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender, logOpts logFieldOptions) error {
+func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection, filter bson.D, baseline *any, builder *frameBuilder, sender *backend.StreamSender, frameOpts frameOptions) error {
 	var lastID any
 	if baseline != nil {
 		// Resume exactly where the triggering SubscribeStream's backlog left
@@ -253,7 +253,7 @@ func (d *Datasource) pollCollection(ctx context.Context, coll *mongo.Collection,
 				continue
 			}
 			lastID = idOf(docs[len(docs)-1])
-			if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, docs, "logs", "logs", logOpts), data.IncludeAll); err != nil {
+			if err := sender.SendFrame(docsToStreamFrameWithLogOptions(builder, docs, "logs", "logs", frameOpts), data.IncludeAll); err != nil {
 				return err
 			}
 		}

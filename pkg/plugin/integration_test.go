@@ -182,7 +182,7 @@ func TestIntegrationQueryHandlers(t *testing.T) {
 		}
 		field := res.Frames[0].Fields[0]
 		v, ok := field.ConcreteAt(0)
-		if !ok || v.(float64) != 3 {
+		if !ok || v.(int64) != 3 {
 			t.Fatalf("count = %v, want 3", v)
 		}
 	})

@@ -32,10 +32,15 @@ func newFrameBuilder() *frameBuilder {
 	return &frameBuilder{cols: map[string]*column{}}
 }
 
-// addDocument flattens one document into the builder as a new row.
-func (b *frameBuilder) addDocument(doc bson.D) {
+// addDocument flattens one document into the builder as a new row. maxDepth
+// caps how many levels of nested documents get flattened via dot notation;
+// beyond it, a nested document is kept whole and JSON-encoded into a single
+// column instead, which bounds column growth for deeply nested documents.
+// maxDepth <= 0 means unlimited (flatten every level), matching the
+// long-standing default behavior.
+func (b *frameBuilder) addDocument(doc bson.D, maxDepth int) {
 	flat := make([]bson.E, 0, len(doc))
-	flattenDoc("", doc, &flat, map[string]int{})
+	flattenDoc("", doc, &flat, map[string]int{}, 0, maxDepth)
 
 	for _, e := range flat {
 		name, raw := e.Key, e.Value
@@ -75,12 +80,21 @@ func (b *frameBuilder) resetRows() {
 	}
 }
 
-// coerce reconciles a value whose kind differs from the column's kind.
-// Numbers arriving in a string column are stringified; strings arriving in a
-// numeric column promote the whole column to string.
+// coerce reconciles a value whose kind differs from the column's kind. A
+// number arriving in a column of the other numeric kind (int64/float64)
+// promotes the column to float64, since that's the only one of the two that
+// can represent both without loss; anything else arriving in a numeric,
+// bool or time column promotes the whole column to string, and a number
+// arriving in an established string column is stringified to match.
 func coerce(val any, kind, want data.FieldType, col *column) any {
 	if want == data.FieldTypeNullableString {
 		return stringify(val, kind)
+	}
+	if isNumeric(want) && isNumeric(kind) {
+		if want != data.FieldTypeNullableFloat64 {
+			promoteColumnToFloat64(col)
+		}
+		return toFloat64(val)
 	}
 	// Promote the column to string and convert existing values.
 	old := col.kind
@@ -93,6 +107,35 @@ func coerce(val any, kind, want data.FieldType, col *column) any {
 	return stringify(val, kind)
 }
 
+func isNumeric(k data.FieldType) bool {
+	return k == data.FieldTypeNullableFloat64 || k == data.FieldTypeNullableInt64
+}
+
+// promoteColumnToFloat64 converts a column's already-collected *int64 values
+// to *float64 in place and updates its kind, used when a float64 value
+// arrives in a column established as int64.
+func promoteColumnToFloat64(col *column) {
+	for i, v := range col.vals {
+		if iv, ok := v.(*int64); ok {
+			f := float64(*iv)
+			col.vals[i] = &f
+		}
+	}
+	col.kind = data.FieldTypeNullableFloat64
+}
+
+// toFloat64 converts a *int64 or *float64 value to *float64.
+func toFloat64(val any) any {
+	switch v := val.(type) {
+	case *int64:
+		f := float64(*v)
+		return &f
+	case *float64:
+		return v
+	}
+	return val
+}
+
 func stringify(val any, kind data.FieldType) any {
 	var s string
 	switch v := val.(type) {
@@ -100,6 +143,8 @@ func stringify(val any, kind data.FieldType) any {
 		return v
 	case *float64:
 		s = strconv.FormatFloat(*v, 'f', -1, 64)
+	case *int64:
+		s = strconv.FormatInt(*v, 10)
 	case *bool:
 		s = strconv.FormatBool(*v)
 	case *time.Time:
@@ -117,14 +162,20 @@ func stringify(val any, kind data.FieldType) any {
 // run). Arrays and other non-scalar leaves are kept whole and later
 // JSON-encoded. seen tracks each key's index in out so a repeated key
 // overwrites in place rather than duplicating.
-func flattenDoc(prefix string, doc bson.D, out *[]bson.E, seen map[string]int) {
+//
+// depth is the nesting level of doc (0 at the top level); maxDepth caps how
+// deep flattening recurses, matching frameBuilder.addDocument's maxDepth. A
+// nested document reached at maxDepth is kept whole rather than recursed
+// into, so it falls through to normalizeValue's default case and is
+// JSON-encoded into a single column instead of exploding into many.
+func flattenDoc(prefix string, doc bson.D, out *[]bson.E, seen map[string]int, depth, maxDepth int) {
 	for _, e := range doc {
 		key := e.Key
 		if prefix != "" {
 			key = prefix + "." + key
 		}
-		if sub, ok := e.Value.(bson.D); ok {
-			flattenDoc(key, sub, out, seen)
+		if sub, ok := e.Value.(bson.D); ok && (maxDepth <= 0 || depth < maxDepth) {
+			flattenDoc(key, sub, out, seen, depth+1, maxDepth)
 			continue
 		}
 		if idx, ok := seen[key]; ok {
@@ -136,8 +187,11 @@ func flattenDoc(prefix string, doc bson.D, out *[]bson.E, seen map[string]int) {
 	}
 }
 
-// normalizeValue converts a BSON value into one of the four supported
-// nullable field types.
+// normalizeValue converts a BSON value into one of the five supported
+// nullable field types. Integers keep their int64 type rather than being
+// coerced to float64, so whole-number fields render and export as integers;
+// a column that sees both integers and floats promotes to float64 (see
+// coerce), the only one of the two that can represent both without loss.
 func normalizeValue(v any) (data.FieldType, any) {
 	switch val := v.(type) {
 	case nil:
@@ -147,11 +201,10 @@ func normalizeValue(v any) (data.FieldType, any) {
 	case bool:
 		return data.FieldTypeNullableBool, &val
 	case int32:
-		f := float64(val)
-		return data.FieldTypeNullableFloat64, &f
+		i := int64(val)
+		return data.FieldTypeNullableInt64, &i
 	case int64:
-		f := float64(val)
-		return data.FieldTypeNullableFloat64, &f
+		return data.FieldTypeNullableInt64, &val
 	case float64:
 		f := val
 		return data.FieldTypeNullableFloat64, &f
@@ -264,6 +317,14 @@ func (c *column) toField() *data.Field {
 			}
 		}
 		return data.NewField(c.name, nil, vals)
+	case data.FieldTypeNullableInt64:
+		vals := make([]*int64, len(c.vals))
+		for i, v := range c.vals {
+			if v != nil {
+				vals[i] = v.(*int64)
+			}
+		}
+		return data.NewField(c.name, nil, vals)
 	case data.FieldTypeNullableFloat64:
 		vals := make([]*float64, len(c.vals))
 		for i, v := range c.vals {
@@ -295,9 +356,10 @@ type derivedField struct {
 	urlDisplayLabel string
 }
 
-// logFieldOptions configures how a "logs" format frame is shaped. Ignored
-// for every other format.
-type logFieldOptions struct {
+// frameOptions configures how a frame is built. messageField/levelField/
+// derivedFields only apply to "logs" format frames; maxDepth applies to
+// every format.
+type frameOptions struct {
 	// messageField/levelField rename the given document field (if present)
 	// to the canonical "message"/"level" column the logs visualization
 	// looks for. Empty leaves columns as-is, i.e. today's behavior of
@@ -306,18 +368,24 @@ type logFieldOptions struct {
 	levelField   string
 	// derivedFields extracts extra link columns out of the message column.
 	derivedFields []derivedField
+	// maxDepth caps how many levels of nested documents get flattened via
+	// dot notation before a nested document is instead kept whole as a
+	// single JSON-encoded column (see frameBuilder.addDocument). <= 0 means
+	// unlimited, i.e. today's behavior of flattening every level.
+	maxDepth int
 }
 
 // docsToFrame converts query results into a frame shaped for the requested
-// format: "timeseries" attempts a long-to-wide conversion, "logs" tags the
+// format: "timeseries" attempts a long-to-wide conversion, "long" returns a
+// time-sorted long frame without attempting that conversion, "logs" tags the
 // frame for the logs visualization, anything else stays tabular.
 func docsToFrame(docs []bson.D, refID, format string) *data.Frame {
-	return buildDocsFrame(newFrameBuilder(), docs, refID, format, logFieldOptions{})
+	return buildDocsFrame(newFrameBuilder(), docs, refID, format, frameOptions{})
 }
 
 // docsToFrameWithLogOptions is docsToFrame with logs-specific field mapping
-// and derived fields applied (see logFieldOptions).
-func docsToFrameWithLogOptions(docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
+// and derived fields, plus flatten-depth control, applied (see frameOptions).
+func docsToFrameWithLogOptions(docs []bson.D, refID, format string, opts frameOptions) *data.Frame {
 	return buildDocsFrame(newFrameBuilder(), docs, refID, format, opts)
 }
 
@@ -328,25 +396,30 @@ func docsToFrameWithLogOptions(docs []bson.D, refID, format string, opts logFiel
 // events, which are typically converted one document at a time.
 func docsToStreamFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
 	b.resetRows()
-	return buildDocsFrame(b, docs, refID, format, logFieldOptions{})
+	return buildDocsFrame(b, docs, refID, format, frameOptions{})
 }
 
 // docsToStreamFrameWithLogOptions is docsToStreamFrame with logs-specific
-// field mapping and derived fields applied (see logFieldOptions).
-func docsToStreamFrameWithLogOptions(b *frameBuilder, docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
+// field mapping and derived fields, plus flatten-depth control, applied (see
+// frameOptions).
+func docsToStreamFrameWithLogOptions(b *frameBuilder, docs []bson.D, refID, format string, opts frameOptions) *data.Frame {
 	b.resetRows()
 	return buildDocsFrame(b, docs, refID, format, opts)
 }
 
-func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
+func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string, opts frameOptions) *data.Frame {
 	for _, doc := range docs {
-		b.addDocument(doc)
+		b.addDocument(doc, opts.maxDepth)
 	}
 	frame := b.buildFrame(refID)
 
 	switch format {
 	case "timeseries":
 		return toTimeSeries(frame)
+	case "long":
+		sortFrameByTime(frame)
+		frame.Meta = &data.FrameMeta{Type: data.FrameTypeTimeSeriesLong}
+		return frame
 	case "logs":
 		renameField(frame, opts.messageField, "message")
 		renameField(frame, opts.levelField, "level")

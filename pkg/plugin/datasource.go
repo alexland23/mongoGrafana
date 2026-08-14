@@ -95,14 +95,15 @@ func compileDerivedFields(configs []models.DerivedFieldConfig) []derivedField {
 	return fields
 }
 
-// logFieldOptionsFor builds the logs-format frame options for one query,
-// combining its per-query field mapping with the datasource's derived
-// fields.
-func (d *Datasource) logFieldOptionsFor(qm queryModel) logFieldOptions {
-	return logFieldOptions{
+// frameOptionsFor builds the frame options for one query, combining its
+// per-query logs field mapping and flatten-depth override with the
+// datasource's derived fields.
+func (d *Datasource) frameOptionsFor(qm queryModel) frameOptions {
+	return frameOptions{
 		messageField:  qm.MessageField,
 		levelField:    qm.LevelField,
 		derivedFields: d.derivedFields,
+		maxDepth:      int(qm.FlattenDepth),
 	}
 }
 
@@ -270,7 +271,7 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 		return backend.ErrDataResponse(classifyQueryError(err), fmt.Sprintf("%s query failed: %v", queryType, err))
 	}
 
-	frame := docsToFrameWithLogOptions(docs, query.RefID, qm.Format, d.logFieldOptionsFor(qm))
+	frame := docsToFrameWithLogOptions(docs, query.RefID, qm.Format, d.frameOptionsFor(qm))
 	if frame.Meta == nil {
 		frame.Meta = &data.FrameMeta{}
 	}
