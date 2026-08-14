@@ -262,7 +262,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         </InlineField>
         <InlineField
           label="Flatten depth"
-          labelWidth={14}
+          labelWidth={18}
           tooltip='Levels of nested documents to flatten into dot-notation columns before keeping the rest as a single raw JSON column. Blank flattens every level.'
         >
           <Input
