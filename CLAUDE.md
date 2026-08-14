@@ -24,6 +24,7 @@ Run `nvm use` first — the shell profile pins an EOL Node 18, but this plugin r
 ### Test & verify
 
 - Go unit tests live alongside the code, e.g. `pkg/plugin/datasource_test.go` (macros, parsing, framing)
+- `pkg/plugin/integration_test.go` — Go integration tests against a real MongoDB via testcontainers-go (all 5 query handlers, health check, auth-failure paths); gated behind the `integration` build tag (needs Docker) and excluded from `mage test` / plain `go test ./...`. Run with `go test -tags=integration ./pkg/plugin/... -run TestIntegration -v`
 - `npm run test` (watch) / `npm run test:ci` — Jest unit tests
 - `npm run typecheck`, `npm run lint` — TypeScript/ESLint checks
 - `npm run e2e` — Playwright e2e tests (see @./.config/AGENTS/e2e-testing.md)

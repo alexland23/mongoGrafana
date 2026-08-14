@@ -82,10 +82,10 @@ Added a "TLS / Security" fieldset (enable TLS, skip-verify toggle, CA cert / cli
 
 ## Tier 3 — Nice-to-haves / hardening
 
-### 9. Integration tests against real Mongo
-Go tests currently cover only macros/parsing/framing. Add integration tests (testcontainers-go, or the existing docker-compose mongo) exercising all 5 query handlers, health check, and auth-failure paths. Add Jest tests for `filterQuery` / `applyTemplateVariables`.
+### 9. Integration tests against real Mongo — done
+Added `pkg/plugin/integration_test.go` (testcontainers-go, `integration` build tag, needs Docker) exercising all 5 query handlers, `CheckHealth`, and auth-failure paths (wrong password against an authenticated container) through the real `NewDatasource`/`QueryData`/`CheckHealth` entry points. Gated behind the build tag so `mage test` / plain `go test ./...` stay fast and Docker-free; run explicitly with `go test -tags=integration ./pkg/plugin/... -run TestIntegration -v`. Added Jest coverage for `filterQuery` (all query-type branches) and `applyTemplateVariables` (each replaced field, scopedVars/format forwarding, multi-value JSON formatting) in `src/datasource.test.ts`.
 
-- `pkg/plugin/*_test.go`, `src/**/*.test.tsx`
+- `pkg/plugin/integration_test.go`, `src/datasource.test.ts`
 
 ### 10. Query safety & observability
 - A `maxDocuments` guard (server-side limit injection) so a careless `find {}` can't OOM the plugin
