@@ -128,7 +128,7 @@ type queryModel struct {
 	Sort       string `json:"sort"`       // find only, extended JSON document
 	Limit      int64  `json:"limit"`      // find only, 0 = no limit
 	Skip       int64  `json:"skip"`       // find only
-	Format     string `json:"format"`     // table | timeseries | logs
+	Format     string `json:"format"`     // table | timeseries | long | logs
 
 	// MessageField/LevelField rename the given document field to the
 	// canonical "message"/"level" column the logs visualization looks for
@@ -136,6 +136,12 @@ type queryModel struct {
 	// columns as-is.
 	MessageField string `json:"messageField"`
 	LevelField   string `json:"levelField"`
+
+	// FlattenDepth caps how many levels of nested documents get flattened
+	// into dot-notation columns before a nested document is instead kept
+	// whole as a single JSON-encoded column. <= 0 (the zero value) means
+	// unlimited, i.e. today's behavior of flattening every level.
+	FlattenDepth int64 `json:"flattenDepth"`
 }
 
 // interpolateMacros replaces Grafana time macros inside the raw query text

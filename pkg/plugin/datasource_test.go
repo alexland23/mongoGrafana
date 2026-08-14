@@ -240,7 +240,7 @@ func TestDocsToFrameTable(t *testing.T) {
 		}
 	}
 
-	if v, ok := fields["value"].ConcreteAt(0); !ok || v.(float64) != 7 {
+	if v, ok := fields["value"].ConcreteAt(0); !ok || v.(int64) != 7 {
 		t.Errorf("value[0] = %v, want 7", v)
 	}
 	if _, ok := fields["value"].ConcreteAt(1); ok {

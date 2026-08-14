@@ -2,7 +2,7 @@ import { DataSourceJsonData } from '@grafana/data';
 import { DataQuery } from '@grafana/schema';
 
 export type QueryType = 'aggregate' | 'find' | 'count' | 'distinct' | 'command';
-export type QueryFormat = 'table' | 'timeseries' | 'logs';
+export type QueryFormat = 'table' | 'timeseries' | 'long' | 'logs';
 
 /** Code = free-form Monaco editor; Builder = visual pipeline construction (aggregate only). */
 export type EditorMode = 'code' | 'builder';
@@ -99,6 +99,12 @@ export interface MongoQuery extends DataQuery {
   messageField?: string;
   /** Document field to treat as the log level. Only applies to "logs" format; blank keeps the "level" convention. */
   levelField?: string;
+  /**
+   * Caps how many levels of nested documents get flattened into dot-notation columns; beyond it, a
+   * nested document is kept whole as a single JSON-encoded column. Unset/0 means unlimited, i.e.
+   * flattening every level (today's default behavior).
+   */
+  flattenDepth?: number;
 }
 
 export const DEFAULT_QUERY: Partial<MongoQuery> = {

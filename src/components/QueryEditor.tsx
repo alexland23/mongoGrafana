@@ -30,6 +30,7 @@ const QUERY_TYPES: Array<ComboboxOption<QueryType>> = [
 const FORMATS: Array<ComboboxOption<QueryFormat>> = [
   { label: 'Table', value: 'table', description: 'Return rows as-is' },
   { label: 'Time series', value: 'timeseries', description: 'Convert time + value (+ label) rows into series' },
+  { label: 'Long', value: 'long', description: 'Time-sorted long rows (time + value + labels), no wide conversion' },
   { label: 'Logs', value: 'logs', description: 'Render results in the logs visualization' },
 ];
 
@@ -83,7 +84,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
       onChange({ ...query, [key]: event.target.value });
     };
 
-  const onNumberInput = (key: 'limit' | 'skip') => (event: ChangeEvent<HTMLInputElement>) => {
+  const onNumberInput = (key: 'limit' | 'skip' | 'flattenDepth') => (event: ChangeEvent<HTMLInputElement>) => {
     onChange({ ...query, [key]: event.target.value === '' ? undefined : Number(event.target.value) });
   };
 
@@ -258,6 +259,21 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
               onBlur={onRunQuery}
             />
           )}
+        </InlineField>
+        <InlineField
+          label="Flatten depth"
+          labelWidth={14}
+          tooltip='Levels of nested documents to flatten into dot-notation columns before keeping the rest as a single raw JSON column. Blank flattens every level.'
+        >
+          <Input
+            id="query-editor-flatten-depth"
+            type="number"
+            value={query.flattenDepth ?? ''}
+            placeholder="∞"
+            width={12}
+            onChange={onNumberInput('flattenDepth')}
+            onBlur={onRunQuery}
+          />
         </InlineField>
       </InlineFieldRow>
 
