@@ -93,6 +93,8 @@ export interface MongoQuery extends DataQuery {
   editorMode?: EditorMode;
   /** Visual editor state, kept alongside queryText so switching back to Builder mode restores it */
   builder?: QueryBuilderState;
+  /** Tail the collection over Grafana Live instead of running a one-shot query. Only applies to "logs" format. */
+  liveStreaming?: boolean;
 }
 
 export const DEFAULT_QUERY: Partial<MongoQuery> = {

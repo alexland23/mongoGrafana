@@ -1,14 +1,47 @@
+import { merge, Observable, of } from 'rxjs';
+
 import {
   AnnotationQuery,
   AnnotationSupport,
   CoreApp,
+  DataQueryRequest,
+  DataQueryResponse,
   DataSourceInstanceSettings,
   DataSourceVariableSupport,
+  LiveChannelScope,
   ScopedVars,
 } from '@grafana/data';
-import { DataSourceWithBackend, getTemplateSrv } from '@grafana/runtime';
+import { DataSourceWithBackend, getGrafanaLiveSrv, getTemplateSrv } from '@grafana/runtime';
 
 import { DEFAULT_ANNOTATION_QUERY, DEFAULT_QUERY, MongoDataSourceOptions, MongoQuery } from './types';
+
+const isLiveTarget = (query: MongoQuery): boolean => query.format === 'logs' && !!query.liveStreaming;
+
+/** Grafana Live channel paths may only contain [A-z0-9_-/=.]; anything else makes the subscription
+ * fail with "invalid channel ID". */
+const sanitizeChannelSegment = (value: string): string => value.replace(/[^A-Za-z0-9_\-.]/g, '_');
+
+/** Cheap (non-cryptographic) hash so free-form filter text can distinguish live channels without
+ * blowing past Grafana Live's 160-character channel ID limit or violating its character allowlist. */
+const hashChannelSegment = (value: string): string => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 33) ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+/** Distinguishing query params baked into the live channel path so editing the filter, collection or
+ * database re-subscribes to a fresh channel instead of reusing a stale RunStream. */
+const liveChannelPath = (query: MongoQuery): string => {
+  const parts = [
+    sanitizeChannelSegment(query.refId),
+    sanitizeChannelSegment(query.database ?? ''),
+    sanitizeChannelSegment(query.collection ?? ''),
+    hashChannelSegment(query.queryText ?? ''),
+  ];
+  return `logs/${parts.join('/')}`;
+};
 
 /**
  * Lets dashboard variables be defined with the regular query editor; the
@@ -42,6 +75,37 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
 
   getDefaultQuery(_: CoreApp): Partial<MongoQuery> {
     return DEFAULT_QUERY;
+  }
+
+  /**
+   * Splits off "logs" format queries with live tailing enabled and streams
+   * them over Grafana Live (backed by the backend's RunStream, see
+   * pkg/plugin/stream.go), merging them with the regular one-shot response
+   * for the rest of the targets.
+   */
+  query(request: DataQueryRequest<MongoQuery>): Observable<DataQueryResponse> {
+    const targets = request.targets.filter((t) => !t.hide && this.filterQuery(t));
+    const liveTargets = targets.filter(isLiveTarget);
+    const normalTargets = targets.filter((t) => !isLiveTarget(t));
+
+    const responses: Array<Observable<DataQueryResponse>> = liveTargets.map((target) => {
+      const resolved = this.applyTemplateVariables(target, request.scopedVars);
+      return getGrafanaLiveSrv().getDataStream({
+        key: `${request.requestId}-${resolved.refId}`,
+        addr: {
+          scope: LiveChannelScope.DataSource,
+          stream: this.uid,
+          path: liveChannelPath(resolved),
+          data: resolved,
+        },
+      });
+    });
+
+    if (normalTargets.length > 0) {
+      responses.push(super.query({ ...request, targets: normalTargets }));
+    }
+
+    return responses.length > 0 ? merge(...responses) : of({ data: [] });
   }
 
   /** Lists databases visible to schema discovery. */

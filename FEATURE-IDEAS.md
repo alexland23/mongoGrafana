@@ -57,10 +57,11 @@ A toggle between "Code" (current Monaco) and "Builder": pick collection → add 
 - Frontend: new `src/components/QueryBuilder/` components, extend `MongoQuery` in `src/types.ts` (keep raw + builder state, `editorMode` flag)
 - Backend: unchanged (still receives a pipeline)
 
-### 6. Live streaming for log tailing
-Implement `StreamHandler` (`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling for standalone). A "Live" toggle on logs-format queries enables tailing the `logs` collection in Explore. Requires adding the `streaming: true` capability flag.
+### 6. Live streaming for log tailing — done
+Implemented `StreamHandler` (`SubscribeStream`/`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling by `_id` for standalone deployments). A "Live" toggle on logs-format queries tails the selected collection in Explore, seeded with a recent backlog on subscribe. Added the `streaming: true` capability flag; `datasource.Manage` wires up the stream handlers automatically, no `pkg/main.go` change needed.
 
-- Backend: new `pkg/plugin/stream.go`, `pkg/plugin/datasource.go`, `pkg/main.go`
+- Backend: new `pkg/plugin/stream.go` (reuses `queryModel`/`parseDocument`/`docsToFrame` from the regular query path)
+- Frontend: `src/datasource.ts` (`query()` override routes live "logs" targets through `getGrafanaLiveSrv().getDataStream`), `src/components/QueryEditor.tsx` (Live toggle), `src/types.ts`, `src/plugin.json`
 - Frontend: `src/datasource.ts` (channel support), `src/plugin.json`
 
 ### 7. TLS / advanced connection options in the config UI — done

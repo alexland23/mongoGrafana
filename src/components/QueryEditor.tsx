@@ -1,5 +1,14 @@
 import React, { ChangeEvent, useCallback, useEffect, useRef } from 'react';
-import { CodeEditor, Combobox, ComboboxOption, InlineField, InlineFieldRow, Input, RadioButtonGroup } from '@grafana/ui';
+import {
+  CodeEditor,
+  Combobox,
+  ComboboxOption,
+  InlineField,
+  InlineFieldRow,
+  InlineSwitch,
+  Input,
+  RadioButtonGroup,
+} from '@grafana/ui';
 import { QueryEditorProps, SelectableValue } from '@grafana/data';
 import { DataSource } from '../datasource';
 import { EditorMode, MongoDataSourceOptions, MongoQuery, QueryFormat, QueryType } from '../types';
@@ -159,11 +168,24 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             value={query.format ?? 'table'}
             width={20}
             onChange={(v) => {
-              onChange({ ...query, format: v.value });
+              // Live tailing only makes sense for the logs visualization.
+              onChange({ ...query, format: v.value, liveStreaming: v.value === 'logs' ? query.liveStreaming : false });
               onRunQuery();
             }}
           />
         </InlineField>
+        {query.format === 'logs' && queryType !== 'command' && (
+          <InlineField label="Live" labelWidth={8} tooltip="Tail the collection for new matching documents instead of running a one-shot query.">
+            <InlineSwitch
+              id="query-editor-live-streaming"
+              value={!!query.liveStreaming}
+              onChange={(e) => {
+                onChange({ ...query, liveStreaming: e.currentTarget.checked });
+                onRunQuery();
+              }}
+            />
+          </InlineField>
+        )}
         <InlineField label="Database" labelWidth={12} tooltip="Optional override of the datasource default database.">
           {discoveryEnabled ? (
             <Combobox
