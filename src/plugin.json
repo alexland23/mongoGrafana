@@ -8,6 +8,7 @@
   "annotations": true,
   "alerting": true,
   "backend": true,
+  "streaming": true,
   "executable": "gpx_mongo_db",
   "info": {
     "description": "Query and visualize MongoDB data with aggregation pipelines, find, count, distinct and raw commands",
