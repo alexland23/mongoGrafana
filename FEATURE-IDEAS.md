@@ -58,7 +58,7 @@ A toggle between "Code" (current Monaco) and "Builder": pick collection → add 
 - Backend: unchanged (still receives a pipeline)
 
 ### 6. Live streaming for log tailing — done
-Implemented `StreamHandler` (`SubscribeStream`/`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling by `_id` for standalone deployments). A "Live" toggle on logs-format queries tails the selected collection in Explore, seeded with a recent backlog on subscribe. Added the `streaming: true` capability flag; `datasource.Manage` wires up the stream handlers automatically, no `pkg/main.go` change needed.
+Implemented `StreamHandler` (`SubscribeStream`/`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling by `_id` for standalone deployments). A "Live" toggle on logs-format queries tails the selected collection in Explore, seeded with a recent backlog on subscribe. Added the `streaming: true` capability flag; `datasource.Manage` wires up the stream handlers automatically, no `pkg/main.go` change needed. **The `plugin.json` change requires restarting the Grafana server** — a running dev instance won't pick up the Live toggle until restarted.
 
 - Backend: new `pkg/plugin/stream.go` (reuses `queryModel`/`parseDocument`/`docsToFrame` from the regular query path)
 - Frontend: `src/datasource.ts` (`query()` override routes live "logs" targets through `getGrafanaLiveSrv().getDataStream`), `src/components/QueryEditor.tsx` (Live toggle), `src/types.ts`, `src/plugin.json`

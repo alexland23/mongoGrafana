@@ -34,5 +34,5 @@ Findings from `/code-review medium` on `16-live-streaming-log-tailing` (change-s
 
 ## Process
 
-- [ ] **8. `plugin.json` change needs a Grafana restart reminder** — `src/plugin.json:11`
+- [x] **8. `plugin.json` change needs a Grafana restart reminder** — `src/plugin.json:11`
   Adding `"streaming": true` requires a Grafana server restart per `.config/AGENTS/instructions.md` ("Any modifications to plugin.json require a restart of the Grafana server. Remind the user of this."). Not called out anywhere in this change, so the feature will silently appear inert in a running dev Grafana instance until it's restarted.
