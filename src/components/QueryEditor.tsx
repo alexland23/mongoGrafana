@@ -40,6 +40,12 @@ const EDITOR_LABEL: Record<QueryType, string> = {
 
 const toOptions = (values: string[]): Array<ComboboxOption<string>> => values.map((v) => ({ label: v, value: v }));
 
+// Live tailing reuses parseDocument on the backend, which only understands a
+// plain filter document — not an aggregation pipeline ("aggregate") or an
+// arbitrary command document ("command").
+const isLiveEligible = (queryType: QueryType): boolean =>
+  queryType === 'find' || queryType === 'count' || queryType === 'distinct';
+
 const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
   { label: 'Code', value: 'code' },
   { label: 'Builder', value: 'builder' },
@@ -51,8 +57,15 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
 
   const onEditorModeChange = (mode: EditorMode) => {
-    // Builder state only compiles to an aggregation pipeline; switching in forces that query type.
-    onChange({ ...query, editorMode: mode, queryType: mode === 'builder' ? 'aggregate' : query.queryType });
+    // Builder state only compiles to an aggregation pipeline; switching in forces that query type,
+    // which isn't live-eligible, so drop any stale Live toggle along with it.
+    const nextQueryType = mode === 'builder' ? 'aggregate' : query.queryType;
+    onChange({
+      ...query,
+      editorMode: mode,
+      queryType: nextQueryType,
+      liveStreaming: isLiveEligible(nextQueryType ?? 'aggregate') ? query.liveStreaming : false,
+    });
     onRunQuery();
   };
 
@@ -125,7 +138,12 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             width={24}
             onChange={(v) => {
               // Builder state only compiles to an aggregation pipeline; leaving "aggregate" drops back to Code.
-              onChange({ ...query, queryType: v.value, editorMode: v.value === 'aggregate' ? query.editorMode : 'code' });
+              onChange({
+                ...query,
+                queryType: v.value,
+                editorMode: v.value === 'aggregate' ? query.editorMode : 'code',
+                liveStreaming: isLiveEligible(v.value) ? query.liveStreaming : false,
+              });
             }}
           />
         </InlineField>
@@ -174,7 +192,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             }}
           />
         </InlineField>
-        {query.format === 'logs' && queryType !== 'command' && (
+        {query.format === 'logs' && isLiveEligible(queryType) && (
           <InlineField label="Live" labelWidth={8} tooltip="Tail the collection for new matching documents instead of running a one-shot query.">
             <InlineSwitch
               id="query-editor-live-streaming"
