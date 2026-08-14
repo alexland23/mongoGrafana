@@ -130,6 +130,31 @@ func TestFilterAfterID(t *testing.T) {
 	}
 }
 
+func TestFilterAfterIDWithExistingIDKey(t *testing.T) {
+	filter := bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: "bookmark123"}}}}
+
+	got := filterAfterID(filter, 42)
+	want := bson.D{
+		{Key: "$and", Value: bson.A{
+			bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: 42}}}},
+			filter,
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("filterAfterID() = %#v, want %#v", got, want)
+	}
+
+	idCount := 0
+	for _, e := range got {
+		if e.Key == "_id" {
+			idCount++
+		}
+	}
+	if idCount > 1 {
+		t.Errorf("filterAfterID() produced %d top-level _id keys, want at most 1", idCount)
+	}
+}
+
 // TestStreamBaselineHandoff verifies the SubscribeStream->RunStream
 // coordination this package relies on to close the race between the
 // backlog snapshot and the tail's start point: a baseline recorded for a

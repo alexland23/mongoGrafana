@@ -285,12 +285,22 @@ func prefixFilterArray(arr bson.A, prefix string) bson.A {
 
 // filterAfterID returns filter augmented with an _id lower bound so only
 // documents newer than id match. If id is nil, filter is returned unchanged
-// since nothing has been delivered yet, so nothing should be excluded.
+// since nothing has been delivered yet, so nothing should be excluded. If
+// filter already has a top-level _id key (e.g. a user filter that itself
+// bookmarks on _id), the two constraints are combined with $and instead of
+// prepending a second top-level _id key, which would produce a bson.D with
+// duplicate keys and undefined driver/server behavior.
 func filterAfterID(filter bson.D, id any) bson.D {
 	if id == nil {
 		return filter
 	}
-	return append(bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: id}}}}, filter...)
+	idConstraint := bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: id}}}}
+	for _, e := range filter {
+		if e.Key == "_id" {
+			return bson.D{{Key: "$and", Value: bson.A{idConstraint, filter}}}
+		}
+	}
+	return append(idConstraint, filter...)
 }
 
 // findAfterID returns documents matching filter newer than id (all matching
