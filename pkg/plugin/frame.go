@@ -14,11 +14,11 @@ import (
 )
 
 // column accumulates one output field. Values are normalized to one of
-// *time.Time, *bool, *float64 or *string so heterogeneous documents can
-// share a column.
+// *time.Time, *bool, *float64, *int64 or *string so heterogeneous documents
+// can share a column.
 type column struct {
 	name string
-	kind data.FieldType // FieldTypeNullableTime/Bool/Float64/String
+	kind data.FieldType // FieldTypeNullableTime/Bool/Float64/Int64/String
 	vals []any
 }
 
