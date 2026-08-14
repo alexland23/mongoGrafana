@@ -388,7 +388,10 @@ func renameField(frame *data.Frame, from, to string) {
 // attaching it as a clickable data link (e.g. a trace ID linked to a
 // tracing UI). Rows the pattern doesn't match get a nil value for that
 // column. A no-op when there's no "message" column (e.g. renameField above
-// found nothing to rename) or no derived fields are configured.
+// found nothing to rename) or no derived fields are configured. A derived
+// field whose name collides with an existing column (document column or an
+// earlier derived field) is skipped rather than clobbering it, matching
+// renameField's precedent.
 func applyDerivedFields(frame *data.Frame, derived []derivedField) {
 	if len(derived) == 0 {
 		return
@@ -404,7 +407,15 @@ func applyDerivedFields(frame *data.Frame, derived []derivedField) {
 		return
 	}
 
+	names := make(map[string]struct{}, len(frame.Fields))
+	for _, f := range frame.Fields {
+		names[f.Name] = struct{}{}
+	}
+
 	for _, d := range derived {
+		if _, exists := names[d.name]; exists {
+			continue
+		}
 		vals := make([]*string, msg.Len())
 		for i := 0; i < msg.Len(); i++ {
 			v, ok := msg.ConcreteAt(i)
@@ -434,6 +445,7 @@ func applyDerivedFields(frame *data.Frame, derived []derivedField) {
 			Links: []data.DataLink{{Title: label, URL: d.url, TargetBlank: true}},
 		}
 		frame.Fields = append(frame.Fields, field)
+		names[d.name] = struct{}{}
 	}
 }
 

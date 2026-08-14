@@ -82,6 +82,7 @@ func compileDerivedFields(configs []models.DerivedFieldConfig) []derivedField {
 	fields := make([]derivedField, 0, len(configs))
 	for _, c := range configs {
 		if c.Name == "" || c.MatcherRegex == "" || c.URL == "" {
+			log.DefaultLogger.Warn("skipping derived field with missing name, matcher regex, or URL", "name", c.Name)
 			continue
 		}
 		re, err := regexp.Compile(c.MatcherRegex)
