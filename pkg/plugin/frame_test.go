@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"regexp"
 	"testing"
 	"time"
 
@@ -88,6 +89,122 @@ func TestDocsToStreamFrameKeepsSchemaStableAcrossCalls(t *testing.T) {
 	if got, want := fieldNames(third), []string{"level", "msg", "stack", "service"}; !equalStrings(got, want) {
 		t.Fatalf("third frame fields = %v, want %v", got, want)
 	}
+}
+
+// TestLogFieldMappingRenamesConfiguredColumns covers issue 18's "configurable
+// log field mapping": a collection that doesn't name its fields "message"/
+// "level" should still render in the logs visualization once the user maps
+// the actual field names.
+func TestLogFieldMappingRenamesConfiguredColumns(t *testing.T) {
+	docs := []bson.D{{
+		{Key: "time", Value: bson.DateTime(time.Now().UnixMilli())},
+		{Key: "msg", Value: "boom"},
+		{Key: "severity", Value: "error"},
+	}}
+
+	frame := docsToFrameWithLogOptions(docs, "A", "logs", logFieldOptions{messageField: "msg", levelField: "severity"})
+
+	got := fieldNames(frame)
+	for _, want := range []string{"message", "level"} {
+		found := false
+		for _, name := range got {
+			if name == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("fields = %v, want a %q column", got, want)
+		}
+	}
+	for _, unwanted := range []string{"msg", "severity"} {
+		for _, name := range got {
+			if name == unwanted {
+				t.Fatalf("fields = %v, original column %q should have been renamed away", got, unwanted)
+			}
+		}
+	}
+}
+
+// TestLogFieldMappingLeavesUnmappedColumnsAlone guards the zero-value
+// (blank messageField/levelField) case, which must reproduce today's
+// behavior of relying on fields already being named "message"/"level".
+func TestLogFieldMappingLeavesUnmappedColumnsAlone(t *testing.T) {
+	docs := []bson.D{{
+		{Key: "time", Value: bson.DateTime(time.Now().UnixMilli())},
+		{Key: "message", Value: "hello"},
+		{Key: "level", Value: "info"},
+	}}
+
+	frame := docsToFrameWithLogOptions(docs, "A", "logs", logFieldOptions{})
+	if got, want := fieldNames(frame), []string{"time", "message", "level"}; !equalStrings(got, want) {
+		t.Fatalf("fields = %v, want %v", got, want)
+	}
+}
+
+// TestLogFieldMappingDoesNotClobberExistingCanonicalColumn covers the edge
+// case where the configured source field and an already-canonically-named
+// field both exist: the pre-existing "message" column must win rather than
+// being silently overwritten.
+func TestLogFieldMappingDoesNotClobberExistingCanonicalColumn(t *testing.T) {
+	docs := []bson.D{{
+		{Key: "message", Value: "keep me"},
+		{Key: "msg", Value: "should not overwrite"},
+	}}
+
+	frame := docsToFrameWithLogOptions(docs, "A", "logs", logFieldOptions{messageField: "msg"})
+	if got, want := fieldNames(frame), []string{"message", "msg"}; !equalStrings(got, want) {
+		t.Fatalf("fields = %v, want %v (both columns kept, unrenamed)", got, want)
+	}
+}
+
+// TestApplyDerivedFieldsExtractsAndLinksTraceID covers issue 18's derived
+// fields: a trace ID pulled out of the message text via regex should become
+// its own column with a clickable data link, and rows that don't match get
+// a nil value rather than an empty string.
+func TestApplyDerivedFieldsExtractsAndLinksTraceID(t *testing.T) {
+	docs := []bson.D{
+		{{Key: "message", Value: "request failed trace_id=abc123 status=500"}},
+		{{Key: "message", Value: "no trace id in this line"}},
+	}
+	traceRe := mustCompile(`trace_id=(\w+)`)
+	opts := logFieldOptions{
+		derivedFields: []derivedField{
+			{re: traceRe, name: "traceID", url: "https://tracing.example/trace/${__value.raw}", urlDisplayLabel: "Trace view"},
+		},
+	}
+
+	frame := docsToFrameWithLogOptions(docs, "A", "logs", opts)
+
+	var traceField *data.Field
+	for _, f := range frame.Fields {
+		if f.Name == "traceID" {
+			traceField = f
+		}
+	}
+	if traceField == nil {
+		t.Fatalf("fields = %v, want a traceID column", fieldNames(frame))
+	}
+	if v := traceField.At(0); v == nil || *(v.(*string)) != "abc123" {
+		t.Errorf("traceID row 0 = %v, want \"abc123\"", v)
+	}
+	if v := traceField.At(1); v != (*string)(nil) {
+		t.Errorf("traceID row 1 (no match) = %v, want nil", v)
+	}
+	if traceField.Config == nil || len(traceField.Config.Links) != 1 {
+		t.Fatalf("traceID field config = %#v, want one data link", traceField.Config)
+	}
+	link := traceField.Config.Links[0]
+	if link.Title != "Trace view" || link.URL != "https://tracing.example/trace/${__value.raw}" {
+		t.Errorf("traceID link = %#v, unexpected title/url", link)
+	}
+}
+
+func mustCompile(pattern string) *regexp.Regexp {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		panic(err)
+	}
+	return re
 }
 
 func equalStrings(a, b []string) bool {

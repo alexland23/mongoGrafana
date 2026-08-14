@@ -30,3 +30,7 @@ Run `nvm use` first — the shell profile pins an EOL Node 18, but this plugin r
 - Manually verify by exercising the feature against the seeded `sampledb` in Grafana at http://localhost:3000
 
 See `FEATURE-IDEAS.md` for the current improvement roadmap.
+
+### Scratch notes
+
+`notes/` is a gitignored scratch space for `.md` files (checklists, PR review notes, etc.) — save files there when the user asks you to save off notes, since they're not meant to be committed.

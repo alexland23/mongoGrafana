@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/alandave/mongo-db/pkg/models"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -68,7 +70,40 @@ func NewDatasource(_ context.Context, settings backend.DataSourceInstanceSetting
 		return nil, fmt.Errorf("failed to create MongoDB client: %w", err)
 	}
 
-	return &Datasource{client: client, settings: config}, nil
+	return &Datasource{client: client, settings: config, derivedFields: compileDerivedFields(config.DerivedFields)}, nil
+}
+
+// compileDerivedFields precompiles each derived field's regex once at
+// datasource construction instead of per query. Entries with an invalid
+// pattern or no name/URL are dropped with a warning rather than failing
+// datasource construction outright, since the rest of the datasource still
+// works fine without them.
+func compileDerivedFields(configs []models.DerivedFieldConfig) []derivedField {
+	fields := make([]derivedField, 0, len(configs))
+	for _, c := range configs {
+		if c.Name == "" || c.MatcherRegex == "" || c.URL == "" {
+			log.DefaultLogger.Warn("skipping derived field with missing name, matcher regex, or URL", "name", c.Name)
+			continue
+		}
+		re, err := regexp.Compile(c.MatcherRegex)
+		if err != nil {
+			log.DefaultLogger.Warn("skipping derived field with invalid regex", "name", c.Name, "error", err)
+			continue
+		}
+		fields = append(fields, derivedField{re: re, name: c.Name, url: c.URL, urlDisplayLabel: c.URLDisplayLabel})
+	}
+	return fields
+}
+
+// logFieldOptionsFor builds the logs-format frame options for one query,
+// combining its per-query field mapping with the datasource's derived
+// fields.
+func (d *Datasource) logFieldOptionsFor(qm queryModel) logFieldOptions {
+	return logFieldOptions{
+		messageField:  qm.MessageField,
+		levelField:    qm.LevelField,
+		derivedFields: d.derivedFields,
+	}
 }
 
 func readPreferenceFromString(mode string) (*readpref.ReadPref, error) {
@@ -141,6 +176,11 @@ func loadPEMSource(path, content string) ([]byte, error) {
 type Datasource struct {
 	client   *mongo.Client
 	settings *models.PluginSettings
+
+	// derivedFields extracts extra clickable link columns out of "logs"
+	// format results (e.g. a trace ID linked to a tracing UI), precompiled
+	// from settings.DerivedFields at construction. See frame.go.
+	derivedFields []derivedField
 
 	// streamBaselines holds the newest backlog _id SubscribeStream saw for a
 	// given channel path, so RunStream's tail can pick up exactly where the
@@ -233,7 +273,7 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 		return backend.ErrDataResponse(status, fmt.Sprintf("%s query failed: %v", queryType, err))
 	}
 
-	frame := docsToFrame(docs, query.RefID, qm.Format)
+	frame := docsToFrameWithLogOptions(docs, query.RefID, qm.Format, d.logFieldOptionsFor(qm))
 
 	var response backend.DataResponse
 	response.Frames = append(response.Frames, frame)

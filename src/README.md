@@ -71,7 +71,7 @@ With format **Time series**, rows containing a date field, numeric fields and op
 
 - **Table** — rows as returned; nested documents are flattened with dot notation, arrays are rendered as JSON.
 - **Time series** — long-to-wide conversion using the first date column as time and string columns as labels.
-- **Logs** — renders in the logs visualization; include a date field and a `message`-like field.
+- **Logs** — renders in the logs visualization; include a date field and a `message`-like field. If your collection names those fields something else, set "Message field" / "Level field" in the query editor to remap them (blank keeps the `message`/`level` convention). A query editor cheat sheet with sample queries against the seeded `metrics`, `orders` and `logs` collections is available from Explore's "Kick start your query" panel.
 
 ## Template variables
 
@@ -98,6 +98,17 @@ If your columns are named differently, remap them from the "Mapping" section of 
   { "$limit": 100 }
 ]
 ```
+
+## Derived fields (logs)
+
+Configure "Derived fields" on the datasource to pull extra clickable link columns out of logs results, e.g. a trace ID linked to a tracing UI. Each rule has:
+
+- **Regex** — matched against the message field's text; the first capture group becomes the link value (or the whole match if the pattern has no group)
+- **Field name** — name of the new column
+- **URL** — link target; supports the `${__value.raw}` variable
+- **Link label** — optional, defaults to the field name
+
+Example: regex `trace_id=(\w+)`, field name `traceID`, URL `https://tracing.example/trace/${__value.raw}` turns a log line like `request failed trace_id=abc123` into a clickable `traceID` column.
 
 ## Extended JSON
 

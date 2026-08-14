@@ -3,8 +3,10 @@ package plugin
 import (
 	"encoding/base64"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/data"
@@ -281,11 +283,42 @@ func (c *column) toField() *data.Field {
 	}
 }
 
+// derivedField extracts one extra clickable link column out of a logs
+// frame's message field, e.g. pulling a trace ID out of a log line and
+// linking it to a tracing UI. Compiled once from models.DerivedFieldConfig
+// at datasource construction (see Datasource.derivedFields) rather than per
+// query.
+type derivedField struct {
+	re              *regexp.Regexp
+	name            string
+	url             string
+	urlDisplayLabel string
+}
+
+// logFieldOptions configures how a "logs" format frame is shaped. Ignored
+// for every other format.
+type logFieldOptions struct {
+	// messageField/levelField rename the given document field (if present)
+	// to the canonical "message"/"level" column the logs visualization
+	// looks for. Empty leaves columns as-is, i.e. today's behavior of
+	// relying on fields already being named "message"/"level".
+	messageField string
+	levelField   string
+	// derivedFields extracts extra link columns out of the message column.
+	derivedFields []derivedField
+}
+
 // docsToFrame converts query results into a frame shaped for the requested
 // format: "timeseries" attempts a long-to-wide conversion, "logs" tags the
 // frame for the logs visualization, anything else stays tabular.
 func docsToFrame(docs []bson.D, refID, format string) *data.Frame {
-	return buildDocsFrame(newFrameBuilder(), docs, refID, format)
+	return buildDocsFrame(newFrameBuilder(), docs, refID, format, logFieldOptions{})
+}
+
+// docsToFrameWithLogOptions is docsToFrame with logs-specific field mapping
+// and derived fields applied (see logFieldOptions).
+func docsToFrameWithLogOptions(docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
+	return buildDocsFrame(newFrameBuilder(), docs, refID, format, opts)
 }
 
 // docsToStreamFrame is docsToFrame but built onto a builder the caller keeps
@@ -295,10 +328,17 @@ func docsToFrame(docs []bson.D, refID, format string) *data.Frame {
 // events, which are typically converted one document at a time.
 func docsToStreamFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
 	b.resetRows()
-	return buildDocsFrame(b, docs, refID, format)
+	return buildDocsFrame(b, docs, refID, format, logFieldOptions{})
 }
 
-func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
+// docsToStreamFrameWithLogOptions is docsToStreamFrame with logs-specific
+// field mapping and derived fields applied (see logFieldOptions).
+func docsToStreamFrameWithLogOptions(b *frameBuilder, docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
+	b.resetRows()
+	return buildDocsFrame(b, docs, refID, format, opts)
+}
+
+func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string, opts logFieldOptions) *data.Frame {
 	for _, doc := range docs {
 		b.addDocument(doc)
 	}
@@ -308,11 +348,104 @@ func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.
 	case "timeseries":
 		return toTimeSeries(frame)
 	case "logs":
+		renameField(frame, opts.messageField, "message")
+		renameField(frame, opts.levelField, "level")
+		applyDerivedFields(frame, opts.derivedFields)
 		frame.Meta = &data.FrameMeta{PreferredVisualization: data.VisTypeLogs}
 		return frame
 	default:
 		frame.Meta = &data.FrameMeta{PreferredVisualization: data.VisTypeTable}
 		return frame
+	}
+}
+
+// renameField points the logs visualization at a differently-named document
+// field by renaming it to the canonical name ("message" or "level") it
+// looks for by convention. A blank "from", a from equal to the canonical
+// name, a missing source column, or a pre-existing column already using the
+// canonical name are all no-ops -- the last of those avoids silently
+// clobbering a field that's already correctly named.
+func renameField(frame *data.Frame, from, to string) {
+	from = strings.TrimSpace(from)
+	if from == "" || from == to {
+		return
+	}
+	for _, f := range frame.Fields {
+		if f.Name == to {
+			return
+		}
+	}
+	for _, f := range frame.Fields {
+		if f.Name == from {
+			f.Name = to
+			return
+		}
+	}
+}
+
+// applyDerivedFields appends one nullable-string column per configured
+// derived field, extracting a value from each row's "message" column and
+// attaching it as a clickable data link (e.g. a trace ID linked to a
+// tracing UI). Rows the pattern doesn't match get a nil value for that
+// column. A no-op when there's no "message" column (e.g. renameField above
+// found nothing to rename) or no derived fields are configured. A derived
+// field whose name collides with an existing column (document column or an
+// earlier derived field) is skipped rather than clobbering it, matching
+// renameField's precedent.
+func applyDerivedFields(frame *data.Frame, derived []derivedField) {
+	if len(derived) == 0 {
+		return
+	}
+	var msg *data.Field
+	for _, f := range frame.Fields {
+		if f.Name == "message" {
+			msg = f
+			break
+		}
+	}
+	if msg == nil {
+		return
+	}
+
+	names := make(map[string]struct{}, len(frame.Fields))
+	for _, f := range frame.Fields {
+		names[f.Name] = struct{}{}
+	}
+
+	for _, d := range derived {
+		if _, exists := names[d.name]; exists {
+			continue
+		}
+		vals := make([]*string, msg.Len())
+		for i := 0; i < msg.Len(); i++ {
+			v, ok := msg.ConcreteAt(i)
+			if !ok {
+				continue
+			}
+			s, ok := v.(string)
+			if !ok {
+				continue
+			}
+			m := d.re.FindStringSubmatch(s)
+			if m == nil {
+				continue
+			}
+			extracted := m[0]
+			if len(m) > 1 {
+				extracted = m[1]
+			}
+			vals[i] = &extracted
+		}
+		label := d.urlDisplayLabel
+		if label == "" {
+			label = d.name
+		}
+		field := data.NewField(d.name, nil, vals)
+		field.Config = &data.FieldConfig{
+			Links: []data.DataLink{{Title: label, URL: d.url, TargetBlank: true}},
+		}
+		frame.Fields = append(frame.Fields, field)
+		names[d.name] = struct{}{}
 	}
 }
 

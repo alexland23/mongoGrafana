@@ -46,3 +46,6 @@ ci/
 .idea
 
 .eslintcache
+
+# Scratch notes (not committed — see CLAUDE.md)
+/notes/

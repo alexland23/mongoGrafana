@@ -57,7 +57,25 @@ type PluginSettings struct {
 	// always wins over an allow match.
 	CollectionFilters []string `json:"collectionFilters"`
 
+	// DerivedFields extracts extra clickable link columns out of "logs"
+	// format results, e.g. pulling a trace ID out of the message field and
+	// linking it to a tracing UI. Matched against the message column
+	// (see queryModel.MessageField in pkg/plugin).
+	DerivedFields []DerivedFieldConfig `json:"derivedFields"`
+
 	Secrets *SecretPluginSettings `json:"-"`
+}
+
+// DerivedFieldConfig describes one derived link field applied to logs
+// results. MatcherRegex is evaluated against each row's message text; the
+// first capture group is used as the field's value, or the whole match if
+// the pattern has no capture group. URL supports the standard Grafana data
+// link variable ${__value.raw}.
+type DerivedFieldConfig struct {
+	MatcherRegex    string `json:"matcherRegex"`
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	URLDisplayLabel string `json:"urlDisplayLabel"`
 }
 
 type SecretPluginSettings struct {
