@@ -234,7 +234,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             />
           </InlineField>
         )}
-        <InlineField label="Database" labelWidth={12} tooltip="Optional override of the datasource default database.">
+        <InlineField label="Database" labelWidth={16} tooltip="Optional override of the datasource default database.">
           {discoveryEnabled ? (
             <Combobox
               id="query-editor-database"
@@ -262,7 +262,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         </InlineField>
         <InlineField
           label="Flatten depth"
-          labelWidth={14}
+          labelWidth={18}
           tooltip='Levels of nested documents to flatten into dot-notation columns before keeping the rest as a single raw JSON column. Blank flattens every level.'
         >
           <Input
@@ -281,7 +281,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         <InlineFieldRow>
           <InlineField
             label="Message field"
-            labelWidth={14}
+            labelWidth={18}
             tooltip='Document field to treat as the log line. Blank uses the "message" convention.'
           >
             <Input
@@ -295,7 +295,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
           </InlineField>
           <InlineField
             label="Level field"
-            labelWidth={12}
+            labelWidth={16}
             tooltip='Document field to treat as the log level. Blank uses the "level" convention.'
           >
             <Input
