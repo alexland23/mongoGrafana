@@ -63,6 +63,25 @@ type PluginSettings struct {
 	// (see queryModel.MessageField in pkg/plugin).
 	DerivedFields []DerivedFieldConfig `json:"derivedFields"`
 
+	// MaxDocuments bounds how many documents a "find" or "aggregate" query
+	// can return, injected server-side (SetLimit / a trailing $limit stage)
+	// so a careless find({}) can't pull an entire collection into memory.
+	// Zero/unset defaults to 10000; a negative value disables the guard.
+	MaxDocuments int64 `json:"maxDocuments"`
+
+	// OperatorSafetyMode controls the operator/command denylist applied to
+	// query text before it reaches MongoDB. Empty (the default) blocks
+	// defaultBlockedOperators/defaultBlockedCommands plus BlockedOperators/
+	// BlockedCommands below; "off" disables the check for datasources that
+	// intentionally need e.g. $merge for materialized views.
+	OperatorSafetyMode string `json:"operatorSafetyMode"`
+	// BlockedOperators adds extra pipeline/filter operator keys (e.g.
+	// "$lookup") to the built-in denylist.
+	BlockedOperators []string `json:"blockedOperators"`
+	// BlockedCommands adds extra "command" query type top-level command
+	// names (e.g. "collMod") to the built-in denylist.
+	BlockedCommands []string `json:"blockedCommands"`
+
 	Secrets *SecretPluginSettings `json:"-"`
 }
 
@@ -102,6 +121,9 @@ func LoadPluginSettings(source backend.DataSourceInstanceSettings) (*PluginSetti
 	}
 	if settings.ConnectTimeoutSeconds <= 0 {
 		settings.ConnectTimeoutSeconds = 10
+	}
+	if settings.MaxDocuments == 0 {
+		settings.MaxDocuments = 10000
 	}
 
 	settings.Secrets = loadSecretPluginSettings(source.DecryptedSecureJSONData)

@@ -163,6 +163,22 @@ export interface MongoDataSourceOptions extends DataSourceJsonData {
    * the message field and linking it to a tracing UI.
    */
   derivedFields?: DerivedFieldConfig[];
+  /**
+   * Caps how many documents a "find" or "aggregate" query can return, injected server-side so a
+   * careless find({}) can't pull an entire collection into memory. Zero/unset defaults to 10000 on
+   * the backend; a negative value disables the guard.
+   */
+  maxDocuments?: number;
+  /**
+   * "" (default) blocks a built-in denylist of destructive/JS-execution operators ($out, $merge,
+   * $where, $function, $accumulator) and admin commands (dropDatabase, shutdown, eval); "off"
+   * disables the check entirely, e.g. for datasources that intentionally use $merge.
+   */
+  operatorSafetyMode?: '' | 'off';
+  /** Extra pipeline/filter operator keys (e.g. "$lookup") to block beyond the built-in denylist. */
+  blockedOperators?: string[];
+  /** Extra "command" query type top-level command names to block beyond the built-in denylist. */
+  blockedCommands?: string[];
 }
 
 /**

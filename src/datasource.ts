@@ -143,6 +143,20 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
     return this.getResource<string[]>('fields', db ? { db, collection } : { collection });
   }
 
+  /**
+   * Runs MongoDB's explain command for an aggregate or find query and returns the raw query plan.
+   * Macros ($__timeFrom etc.) are not interpolated -- there's no dashboard time range at this point
+   * -- so a query relying on them should be explained with literal values substituted.
+   */
+  explainQuery(query: MongoQuery): Promise<Record<string, unknown>> {
+    return this.postResource<Record<string, unknown>>('explain', {
+      queryType: query.queryType ?? 'aggregate',
+      database: query.database,
+      collection: query.collection,
+      queryText: query.queryText,
+    });
+  }
+
   applyTemplateVariables(query: MongoQuery, scopedVars: ScopedVars): MongoQuery {
     const templateSrv = getTemplateSrv();
     const replace = (text?: string) => (text ? templateSrv.replace(text, scopedVars, jsonAwareFormat) : text);

@@ -87,6 +87,36 @@ export function ConfigEditor(props: Props) {
     onDerivedFieldsChange((jsonData.derivedFields || []).filter((_, i) => i !== index));
   };
 
+  const onBlockedOperatorsChange = (tags: string[]) => {
+    onOptionsChange({
+      ...options,
+      jsonData: {
+        ...jsonData,
+        blockedOperators: tags,
+      },
+    });
+  };
+
+  const onBlockedCommandsChange = (tags: string[]) => {
+    onOptionsChange({
+      ...options,
+      jsonData: {
+        ...jsonData,
+        blockedCommands: tags,
+      },
+    });
+  };
+
+  const onOperatorSafetyModeChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onOptionsChange({
+      ...options,
+      jsonData: {
+        ...jsonData,
+        operatorSafetyMode: event.target.checked ? 'off' : '',
+      },
+    });
+  };
+
   const onReadPreferenceChange = (option: SelectableValue<string> | null) => {
     onOptionsChange({
       ...options,
@@ -328,6 +358,60 @@ export function ConfigEditor(props: Props) {
             onChange={onJsonDataChange('maxPoolSize', true)}
           />
         </Field>
+      </FieldSet>
+
+      <FieldSet label="Query safety">
+        <Field
+          label="Max documents"
+          description="Caps how many documents a find or aggregate query can return, enforced on the backend regardless of what a query or panel requests. Blank/0 defaults to 10000. A negative value disables the guard."
+        >
+          <Input
+            id="config-editor-max-documents"
+            type="number"
+            value={jsonData.maxDocuments ?? ''}
+            placeholder="10000"
+            width={20}
+            onChange={onJsonDataChange('maxDocuments', true)}
+          />
+        </Field>
+        <Field
+          label="Disable operator/command safety checks"
+          description="By default, dangerous pipeline/filter operators ($out, $merge, $where, $function, $accumulator) and admin commands (dropDatabase, shutdown, eval) are rejected before reaching MongoDB. Turn this on only if this datasource intentionally needs one of them, e.g. $merge for materialized views."
+        >
+          <Switch
+            id="config-editor-operator-safety-off"
+            value={jsonData.operatorSafetyMode === 'off'}
+            onChange={onOperatorSafetyModeChange}
+          />
+        </Field>
+        {jsonData.operatorSafetyMode !== 'off' && (
+          <>
+            <Field
+              label="Additional blocked operators"
+              description='Extra pipeline/filter operator keys to reject beyond the built-in list ($out, $merge, $where, $function, $accumulator), e.g. $lookup. Press enter to add each one.'
+            >
+              <TagsInput
+                id="config-editor-blocked-operators"
+                tags={jsonData.blockedOperators || []}
+                placeholder="$lookup"
+                width={60}
+                onChange={onBlockedOperatorsChange}
+              />
+            </Field>
+            <Field
+              label="Additional blocked commands"
+              description='Extra "command" query type top-level command names to reject beyond the built-in list (dropDatabase, shutdown, eval), e.g. collMod. Press enter to add each one.'
+            >
+              <TagsInput
+                id="config-editor-blocked-commands"
+                tags={jsonData.blockedCommands || []}
+                placeholder="collMod"
+                width={60}
+                onChange={onBlockedCommandsChange}
+              />
+            </Field>
+          </>
+        )}
       </FieldSet>
 
       <FieldSet label="Schema discovery">

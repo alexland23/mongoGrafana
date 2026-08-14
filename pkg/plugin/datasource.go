@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -246,6 +246,7 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 	db := d.client.Database(dbName)
 	coll := db.Collection(qm.Collection)
 	text := interpolateMacros(qm.QueryText, query)
+	guard := newOperatorGuard(d.settings)
 
 	var (
 		docs []bson.D
@@ -253,38 +254,42 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 	)
 	switch queryType {
 	case "aggregate":
-		docs, err = runAggregate(ctx, coll, text)
+		docs, err = runAggregate(ctx, coll, text, guard, d.settings.MaxDocuments)
 	case "find":
-		docs, err = runFind(ctx, coll, text, qm)
+		docs, err = runFind(ctx, coll, text, qm, guard, d.settings.MaxDocuments)
 	case "count":
-		docs, err = runCount(ctx, coll, text)
+		docs, err = runCount(ctx, coll, text, guard)
 	case "distinct":
-		docs, err = runDistinct(ctx, coll, text, qm.Field)
+		docs, err = runDistinct(ctx, coll, text, qm.Field, guard)
 	case "command":
-		docs, err = runCommand(ctx, db, text)
+		docs, err = runCommand(ctx, db, text, guard)
 	default:
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("unknown query type %q", queryType))
 	}
 	if err != nil {
-		status := backend.StatusBadRequest
-		if !strings.Contains(err.Error(), "invalid") {
-			status = backend.StatusInternal
-		}
-		return backend.ErrDataResponse(status, fmt.Sprintf("%s query failed: %v", queryType, err))
+		return backend.ErrDataResponse(classifyQueryError(err), fmt.Sprintf("%s query failed: %v", queryType, err))
 	}
 
 	frame := docsToFrameWithLogOptions(docs, query.RefID, qm.Format, d.logFieldOptionsFor(qm))
+	if frame.Meta == nil {
+		frame.Meta = &data.FrameMeta{}
+	}
+	frame.Meta.ExecutedQueryString = text
 
 	var response backend.DataResponse
 	response.Frames = append(response.Frames, frame)
 	return response
 }
 
-func runAggregate(ctx context.Context, coll *mongo.Collection, text string) ([]bson.D, error) {
+func runAggregate(ctx context.Context, coll *mongo.Collection, text string, guard *operatorGuard, maxDocuments int64) ([]bson.D, error) {
 	pipeline, err := parsePipeline(text)
 	if err != nil {
 		return nil, err
 	}
+	if err := guard.checkPipeline(pipeline); err != nil {
+		return nil, err
+	}
+	pipeline = applyMaxDocumentsLimit(pipeline, maxDocuments)
 	cursor, err := coll.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
@@ -296,10 +301,13 @@ func runAggregate(ctx context.Context, coll *mongo.Collection, text string) ([]b
 	return docs, nil
 }
 
-func runFind(ctx context.Context, coll *mongo.Collection, text string, qm queryModel) ([]bson.D, error) {
+func runFind(ctx context.Context, coll *mongo.Collection, text string, qm queryModel, guard *operatorGuard, maxDocuments int64) ([]bson.D, error) {
 	filter, err := parseDocument(text)
 	if err != nil {
 		return nil, fmt.Errorf("filter: %w", err)
+	}
+	if err := guard.checkDoc(filter); err != nil {
+		return nil, err
 	}
 	opts := options.Find()
 	if qm.Projection != "" {
@@ -316,11 +324,11 @@ func runFind(ctx context.Context, coll *mongo.Collection, text string, qm queryM
 		}
 		opts.SetSort(sortDoc)
 	}
-	if qm.Limit > 0 {
-		opts.SetLimit(qm.Limit)
-	}
 	if qm.Skip > 0 {
 		opts.SetSkip(qm.Skip)
+	}
+	if limit := resolveFindLimit(qm.Limit, maxDocuments); limit > 0 {
+		opts.SetLimit(limit)
 	}
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
@@ -333,9 +341,12 @@ func runFind(ctx context.Context, coll *mongo.Collection, text string, qm queryM
 	return docs, nil
 }
 
-func runCount(ctx context.Context, coll *mongo.Collection, text string) ([]bson.D, error) {
+func runCount(ctx context.Context, coll *mongo.Collection, text string, guard *operatorGuard) ([]bson.D, error) {
 	filter, err := parseDocument(text)
 	if err != nil {
+		return nil, err
+	}
+	if err := guard.checkDoc(filter); err != nil {
 		return nil, err
 	}
 	count, err := coll.CountDocuments(ctx, filter)
@@ -345,12 +356,15 @@ func runCount(ctx context.Context, coll *mongo.Collection, text string) ([]bson.
 	return []bson.D{{{Key: "count", Value: count}}}, nil
 }
 
-func runDistinct(ctx context.Context, coll *mongo.Collection, text, field string) ([]bson.D, error) {
+func runDistinct(ctx context.Context, coll *mongo.Collection, text, field string, guard *operatorGuard) ([]bson.D, error) {
 	if field == "" {
 		return nil, fmt.Errorf("invalid distinct query: field is required")
 	}
 	filter, err := parseDocument(text)
 	if err != nil {
+		return nil, err
+	}
+	if err := guard.checkDoc(filter); err != nil {
 		return nil, err
 	}
 	var values bson.A
@@ -364,13 +378,16 @@ func runDistinct(ctx context.Context, coll *mongo.Collection, text, field string
 	return docs, nil
 }
 
-func runCommand(ctx context.Context, db *mongo.Database, text string) ([]bson.D, error) {
+func runCommand(ctx context.Context, db *mongo.Database, text string, guard *operatorGuard) ([]bson.D, error) {
 	cmd, err := parseDocument(text)
 	if err != nil {
 		return nil, err
 	}
 	if len(cmd) == 0 {
 		return nil, fmt.Errorf("invalid command: document is empty")
+	}
+	if err := guard.checkCommand(cmd); err != nil {
+		return nil, err
 	}
 	var result bson.D
 	if err := db.RunCommand(ctx, cmd).Decode(&result); err != nil {

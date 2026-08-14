@@ -87,13 +87,11 @@ Added `pkg/plugin/integration_test.go` (testcontainers-go, `integration` build t
 
 - `pkg/plugin/integration_test.go`, `src/datasource.test.ts`
 
-### 10. Query safety & observability
-- A `maxDocuments` guard (server-side limit injection) so a careless `find {}` can't OOM the plugin
-- Set `executedQueryString` in frame meta (the post-macro query) so it shows in the panel inspector — great for debugging
-- Optional "Explain" button in the editor showing the query plan
-- Better error classification than the current "message contains 'invalid'" heuristic — use Mongo server error codes
+### 10. Query safety & observability — done
+Added a `maxDocuments` guard (`SetLimit` on find, a trailing `$limit` stage on aggregate; configurable, negative disables it), an operator/command safety denylist (blocks `$out`/`$merge`/`$where`/`$function`/`$accumulator` and admin commands like `dropDatabase`/`shutdown`/`eval` by default, extensible with extra entries or fully disable-able per datasource for cases that intentionally need e.g. `$merge`), `executedQueryString` in frame meta (the post-macro query, visible in the panel inspector), an "Explain" button in the query editor (aggregate/find) that runs MongoDB's `explain` command via a new `/explain` `CallResource` endpoint, and error classification based on `mongo.CommandError` codes / `IsTimeout` / `IsNetworkError` instead of the old "message contains 'invalid'" heuristic.
 
-- Backend: `pkg/plugin/datasource.go`, `pkg/plugin/query.go`, `pkg/plugin/frame.go`
+- Backend: `pkg/plugin/datasource.go`, `pkg/plugin/safety.go`, `pkg/plugin/errors.go`, `pkg/plugin/resource.go`, `pkg/plugin/stream.go`, `pkg/models/settings.go`
+- Frontend: `src/components/ConfigEditor.tsx` (Query safety fieldset), `src/components/QueryEditor.tsx` (Explain button/modal), `src/datasource.ts`, `src/types.ts`
 
 ### 11. Frame conversion improvements
 - Preserve integer types instead of coercing all numbers to float64

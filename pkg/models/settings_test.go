@@ -24,6 +24,27 @@ func TestLoadPluginSettingsDefaults(t *testing.T) {
 	if settings.ConnectTimeoutSeconds != 10 {
 		t.Errorf("ConnectTimeoutSeconds = %d, want default 10", settings.ConnectTimeoutSeconds)
 	}
+	if settings.MaxDocuments != 10000 {
+		t.Errorf("MaxDocuments = %d, want default 10000", settings.MaxDocuments)
+	}
+}
+
+func TestLoadPluginSettingsMaxDocumentsNegativeDisablesGuard(t *testing.T) {
+	jsonData, err := json.Marshal(map[string]any{
+		"connectionString": "mongodb://localhost:27017",
+		"maxDocuments":     -1,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	settings, err := LoadPluginSettings(backend.DataSourceInstanceSettings{JSONData: jsonData})
+	if err != nil {
+		t.Fatalf("LoadPluginSettings returned unexpected error: %v", err)
+	}
+	if settings.MaxDocuments != -1 {
+		t.Errorf("MaxDocuments = %d, want -1 (explicit disable preserved)", settings.MaxDocuments)
+	}
 }
 
 func TestLoadPluginSettingsTLSSecrets(t *testing.T) {
