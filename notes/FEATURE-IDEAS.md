@@ -104,6 +104,15 @@ Added a `maxDocuments` guard (`SetLimit` on find, a trailing `$limit` stage on a
 - `git init` + push — the repo isn't version-controlled yet!
 - Plugin signing, screenshots/logo in `src/img`, a CHANGELOG, provisioning docs — all prerequisites for submitting to the Grafana plugin catalog
 
+### 13. Lint & coverage reporting in CI
+- Give `golangci-lint` its own CI job/status check (today it only runs as a step inside the combined `build` job in `.github/workflows/ci.yml`) so lint failures are visible independently of build/test
+- Add Go test coverage reporting (`go test -coverprofile`) and JS/TS coverage reporting (`npm run test:ci -- --coverage`), uploaded as CI artifacts or to a coverage service
+- Add README badges for CI status, lint status, and coverage percentage
+
+- Backend: `.github/workflows/ci.yml`, `Magefile.go`
+- Frontend: `.github/workflows/ci.yml`, `jest.config.js` (or equivalent)
+- Docs: `README.md`
+
 ---
 
 ## Suggested first batch
