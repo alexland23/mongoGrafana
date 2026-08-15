@@ -87,9 +87,9 @@ export interface MongoQuery extends DataQuery {
   projection?: string;
   /** Extended JSON sort document (find) */
   sort?: string;
-  /** Max documents to return (find), 0 = unlimited */
+  /** Max documents to return (find/aggregate), 0 = unlimited */
   limit?: number;
-  /** Documents to skip (find) */
+  /** Documents to skip (find/aggregate) */
   skip?: number;
   /** How the result should be framed */
   format?: QueryFormat;

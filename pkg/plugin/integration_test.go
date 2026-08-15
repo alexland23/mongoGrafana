@@ -156,6 +156,30 @@ func TestIntegrationQueryHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("aggregate with skip and limit", func(t *testing.T) {
+		res := runSingleQuery(t, ds, queryModel{
+			QueryType:  "aggregate",
+			Collection: "metrics",
+			QueryText:  `[{"$sort": {"value": 1}}]`,
+			Skip:       1,
+			Limit:      1,
+		})
+		if res.Error != nil {
+			t.Fatalf("aggregate query failed: %v", res.Error)
+		}
+		if res.Frames[0].Rows() != 1 {
+			t.Fatalf("expected 1 row, got %d", res.Frames[0].Rows())
+		}
+		field, _ := res.Frames[0].FieldByName("value")
+		if field == nil {
+			t.Fatalf("expected a \"value\" field in %+v", res.Frames[0])
+		}
+		v, ok := field.ConcreteAt(0)
+		if !ok || v.(int64) != 2 {
+			t.Fatalf("value = %v, want 2 (the middle document of sorted [1, 2, 3])", v)
+		}
+	})
+
 	t.Run("find", func(t *testing.T) {
 		res := runSingleQuery(t, ds, queryModel{
 			QueryType:  "find",

@@ -126,8 +126,8 @@ type queryModel struct {
 	Field      string `json:"field"`      // distinct only
 	Projection string `json:"projection"` // find only, extended JSON document
 	Sort       string `json:"sort"`       // find only, extended JSON document
-	Limit      int64  `json:"limit"`      // find only, 0 = no limit
-	Skip       int64  `json:"skip"`       // find only
+	Limit      int64  `json:"limit"`      // find/aggregate, 0 = no limit
+	Skip       int64  `json:"skip"`       // find/aggregate
 	Format     string `json:"format"`     // table | timeseries | long | logs
 
 	// MessageField/LevelField rename the given document field to the
