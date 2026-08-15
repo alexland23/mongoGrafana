@@ -14,8 +14,9 @@ import {
 } from '@grafana/ui';
 import { QueryEditorProps, SelectableValue } from '@grafana/data';
 import { DataSource } from '../datasource';
-import { EditorMode, MongoDataSourceOptions, MongoQuery, QueryFormat, QueryType } from '../types';
+import { DEFAULT_BUILDER_STATE, EditorMode, MongoDataSourceOptions, MongoQuery, QueryFormat, QueryType } from '../types';
 import { QueryBuilder } from './QueryBuilder';
+import { compileBuilderState } from './QueryBuilder/compile';
 
 type Props = QueryEditorProps<DataSource, MongoQuery, MongoDataSourceOptions>;
 
@@ -55,6 +56,10 @@ const isLiveEligible = (queryType: QueryType): boolean =>
 // filters with no query plan of their own) or "command" (arbitrary, not necessarily explainable).
 const isExplainEligible = (queryType: QueryType): boolean => queryType === 'aggregate' || queryType === 'find';
 
+// The visual Builder compiles to an aggregation pipeline ("aggregate") or a bare filter document
+// ("find"/"count"/"distinct"); "command" takes an arbitrary command document Builder can't produce.
+const isBuilderEligible = (queryType: QueryType): boolean => queryType !== 'command';
+
 const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
   { label: 'Code', value: 'code' },
   { label: 'Builder', value: 'builder' },
@@ -66,15 +71,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
 
   const onEditorModeChange = (mode: EditorMode) => {
-    // Builder state only compiles to an aggregation pipeline; switching in forces that query type,
-    // which isn't live-eligible, so drop any stale Live toggle along with it.
-    const nextQueryType = mode === 'builder' ? 'aggregate' : query.queryType;
-    onChange({
-      ...query,
-      editorMode: mode,
-      queryType: nextQueryType,
-      liveStreaming: isLiveEligible(nextQueryType ?? 'aggregate') ? query.liveStreaming : false,
-    });
+    onChange({ ...query, editorMode: mode });
     onRunQuery();
   };
 
@@ -167,17 +164,23 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             value={queryType}
             width={24}
             onChange={(v) => {
-              // Builder state only compiles to an aggregation pipeline; leaving "aggregate" drops back to Code.
+              // "command" has no Builder support; leaving it for a builder-eligible type is fine
+              // as-is, but moving *to* it while in Builder mode must drop back to Code.
+              const nextEditorMode = isBuilderEligible(v.value) ? editorMode : 'code';
               onChange({
                 ...query,
                 queryType: v.value,
-                editorMode: v.value === 'aggregate' ? query.editorMode : 'code',
+                editorMode: nextEditorMode,
+                // Builder compiles to a pipeline for "aggregate" and a bare filter document
+                // otherwise; re-compile so the query type change doesn't leave queryText in the
+                // wrong shape for the new type.
+                queryText: nextEditorMode === 'builder' ? compileBuilderState(v.value, query.builder ?? DEFAULT_BUILDER_STATE) : query.queryText,
                 liveStreaming: isLiveEligible(v.value) ? query.liveStreaming : false,
               });
             }}
           />
         </InlineField>
-        {queryType === 'aggregate' && (
+        {isBuilderEligible(queryType) && (
           <InlineField label="Editor" labelWidth={10}>
             <RadioButtonGroup options={EDITOR_MODES} value={editorMode} onChange={(v) => onEditorModeChange(v ?? 'code')} />
           </InlineField>
@@ -387,7 +390,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         </InlineFieldRow>
       )}
 
-      {queryType === 'aggregate' && editorMode === 'builder' ? (
+      {isBuilderEligible(queryType) && editorMode === 'builder' ? (
         <QueryBuilder query={query} onChange={onChange} onRunQuery={onRunQuery} />
       ) : (
         <InlineFieldRow>

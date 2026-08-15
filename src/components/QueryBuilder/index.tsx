@@ -1,7 +1,7 @@
 import React, { ChangeEvent } from 'react';
 import { Button, CodeEditor, InlineField, InlineFieldRow, InlineSwitch, Input } from '@grafana/ui';
 import { BuilderFilter, BuilderSort, DEFAULT_BUILDER_STATE, MongoQuery, QueryBuilderState } from '../../types';
-import { compileBuilderPipeline } from './compile';
+import { compileBuilderState } from './compile';
 import { FilterRow } from './FilterRow';
 import { SortRow } from './SortRow';
 import { GroupByEditor } from './GroupByEditor';
@@ -14,6 +14,10 @@ interface Props {
 
 export function QueryBuilder({ query, onChange, onRunQuery }: Props) {
   const state = query.builder ?? DEFAULT_BUILDER_STATE;
+  const queryType = query.queryType ?? 'find';
+  // "aggregate" compiles the full pipeline (match/group/sort/limit stages); "find"/"count"/"distinct"
+  // take a bare filter document instead -- group-by and limit don't apply to those (see compile.ts).
+  const isAggregate = queryType === 'aggregate';
 
   // A blur fired by clicking a button (e.g. "Add aggregation") reaches this
   // handler before that click's own onChange commits, so running
@@ -24,7 +28,7 @@ export function QueryBuilder({ query, onChange, onRunQuery }: Props) {
 
   const update = (patch: Partial<QueryBuilderState>) => {
     const next = { ...state, ...patch };
-    onChange({ ...query, builder: next, queryText: compileBuilderPipeline(next) });
+    onChange({ ...query, builder: next, queryText: compileBuilderState(queryType, next) });
   };
 
   const addFilter = () => update({ filters: [...state.filters, { field: '', operator: 'eq', value: '' }] });
@@ -81,38 +85,42 @@ export function QueryBuilder({ query, onChange, onRunQuery }: Props) {
         </div>
       </InlineField>
 
-      <InlineField label="Group by" labelWidth={14} grow>
-        <GroupByEditor groupBy={state.groupBy} onChange={(groupBy) => update({ groupBy })} />
-      </InlineField>
+      {isAggregate && (
+        <>
+          <InlineField label="Group by" labelWidth={14} grow>
+            <GroupByEditor groupBy={state.groupBy} onChange={(groupBy) => update({ groupBy })} />
+          </InlineField>
 
-      <InlineField label="Sort" labelWidth={14} grow>
-        <div style={{ width: '100%' }}>
-          {state.sort.map((s, i) => (
-            <SortRow key={i} sort={s} onChange={(sort) => setSort(i, sort)} onRemove={() => removeSort(i)} />
-          ))}
-          <Button icon="plus" variant="secondary" size="sm" onClick={addSort}>
-            Add sort
-          </Button>
-        </div>
-      </InlineField>
+          <InlineField label="Sort" labelWidth={14} grow>
+            <div style={{ width: '100%' }}>
+              {state.sort.map((s, i) => (
+                <SortRow key={i} sort={s} onChange={(sort) => setSort(i, sort)} onRemove={() => removeSort(i)} />
+              ))}
+              <Button icon="plus" variant="secondary" size="sm" onClick={addSort}>
+                Add sort
+              </Button>
+            </div>
+          </InlineField>
 
-      <InlineFieldRow>
-        <InlineField label="Limit" labelWidth={14}>
-          <Input
-            aria-label="Limit"
-            type="number"
-            width={12}
-            placeholder="∞"
-            value={state.limit ?? ''}
-            onChange={(e: ChangeEvent<HTMLInputElement>) =>
-              update({ limit: e.target.value === '' ? undefined : Number(e.target.value) })
-            }
-            onBlur={onRunQuery}
-          />
-        </InlineField>
-      </InlineFieldRow>
+          <InlineFieldRow>
+            <InlineField label="Limit" labelWidth={14}>
+              <Input
+                aria-label="Limit"
+                type="number"
+                width={12}
+                placeholder="∞"
+                value={state.limit ?? ''}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  update({ limit: e.target.value === '' ? undefined : Number(e.target.value) })
+                }
+                onBlur={onRunQuery}
+              />
+            </InlineField>
+          </InlineFieldRow>
+        </>
+      )}
 
-      <InlineField label="Compiled pipeline" labelWidth={20} grow>
+      <InlineField label={isAggregate ? 'Compiled pipeline' : 'Compiled filter'} labelWidth={20} grow>
         <CodeEditor
           language="json"
           value={query.queryText || ''}

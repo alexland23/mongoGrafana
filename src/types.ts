@@ -4,7 +4,11 @@ import { DataQuery } from '@grafana/schema';
 export type QueryType = 'aggregate' | 'find' | 'count' | 'distinct' | 'command';
 export type QueryFormat = 'table' | 'timeseries' | 'long' | 'logs';
 
-/** Code = free-form Monaco editor; Builder = visual pipeline construction (aggregate only). */
+/**
+ * Code = free-form Monaco editor; Builder = visual construction, compiled into an aggregation
+ * pipeline for "aggregate" or a bare filter document for "find"/"count"/"distinct". Not available
+ * for "command", which takes an arbitrary command document.
+ */
 export type EditorMode = 'code' | 'builder';
 
 export type FilterOperator = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'nin' | 'exists' | 'regex';
@@ -89,7 +93,7 @@ export interface MongoQuery extends DataQuery {
   skip?: number;
   /** How the result should be framed */
   format?: QueryFormat;
-  /** code (default) | builder; builder only applies to aggregate queries */
+  /** code (default) | builder; builder is unavailable for "command" queries */
   editorMode?: EditorMode;
   /** Visual editor state, kept alongside queryText so switching back to Builder mode restores it */
   builder?: QueryBuilderState;
