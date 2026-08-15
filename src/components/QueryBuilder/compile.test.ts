@@ -1,5 +1,5 @@
 import { DEFAULT_BUILDER_STATE, QueryBuilderState } from '../../types';
-import { compileBuilderPipeline } from './compile';
+import { compileBuilderFilter, compileBuilderPipeline, compileBuilderState } from './compile';
 
 const emptyState: QueryBuilderState = {
   timeFilterEnabled: false,
@@ -157,5 +157,66 @@ describe('compileBuilderPipeline', () => {
 
   it('the default builder state compiles to valid JSON', () => {
     expect(() => JSON.parse(compileBuilderPipeline(DEFAULT_BUILDER_STATE).replace(/\$__timeFilter\([^)]*\)/, '"tf"'))).not.toThrow();
+  });
+});
+
+describe('compileBuilderFilter', () => {
+  it('compiles an empty state to an empty filter document', () => {
+    expect(JSON.parse(compileBuilderFilter(emptyState))).toEqual({});
+  });
+
+  it('emits an unquoted $__timeFilter macro as the whole filter document', () => {
+    const filter = compileBuilderFilter({ ...emptyState, timeFilterEnabled: true, timeField: 'time' });
+    expect(filter).toBe('$__timeFilter(time)');
+  });
+
+  it('compiles a single filter into a bare document, not wrapped in $match', () => {
+    const filter = compileBuilderFilter({ ...emptyState, filters: [{ field: 'status', operator: 'eq', value: 'ok' }] });
+    expect(JSON.parse(filter)).toEqual({ status: 'ok' });
+  });
+
+  it('combines a time filter with match filters under $and', () => {
+    const filter = compileBuilderFilter({
+      ...emptyState,
+      timeFilterEnabled: true,
+      filters: [{ field: 'status', operator: 'eq', value: 'ok' }],
+    });
+    const parsed = JSON.parse(filter.replace('$__timeFilter(time)', '"__TF__"'));
+    expect(parsed.$and).toEqual(['__TF__', { status: 'ok' }]);
+  });
+
+  it('skips filters with no field name', () => {
+    expect(JSON.parse(compileBuilderFilter({ ...emptyState, filters: [{ field: '', operator: 'eq', value: '1' }] }))).toEqual(
+      {}
+    );
+  });
+
+  it('ignores group-by, sort and limit, which do not apply to a bare filter document', () => {
+    const filter = compileBuilderFilter({
+      ...emptyState,
+      filters: [{ field: 'status', operator: 'eq', value: 'ok' }],
+      groupBy: { enabled: true, timeField: 'time', aggregations: [{ op: 'count', as: 'n' }] },
+      sort: [{ field: 'time', direction: 'desc' }],
+      limit: 50,
+    });
+    expect(JSON.parse(filter)).toEqual({ status: 'ok' });
+  });
+
+  it('the default builder state compiles to valid JSON', () => {
+    expect(() =>
+      JSON.parse(compileBuilderFilter(DEFAULT_BUILDER_STATE).replace(/\$__timeFilter\([^)]*\)/, '"tf"'))
+    ).not.toThrow();
+  });
+});
+
+describe('compileBuilderState', () => {
+  it('dispatches to compileBuilderPipeline for "aggregate"', () => {
+    const state = { ...emptyState, limit: 10 };
+    expect(compileBuilderState('aggregate', state)).toBe(compileBuilderPipeline(state));
+  });
+
+  it.each(['find', 'count', 'distinct'] as const)('dispatches to compileBuilderFilter for %s', (queryType) => {
+    const state = { ...emptyState, filters: [{ field: 'status', operator: 'eq' as const, value: 'ok' }] };
+    expect(compileBuilderState(queryType, state)).toBe(compileBuilderFilter(state));
   });
 });

@@ -48,6 +48,24 @@ test('aggregate query using a blocked operator is rejected', async ({
   await expect(row.page().getByText('is not permitted by this datasource\'s safety settings')).toBeVisible();
 });
 
+test('builder mode compiles a bare filter document for a count query', async ({ panelEditPage, readProvisionedDataSource }) => {
+  const ds = await readProvisionedDataSource({ fileName: 'datasources.yml' });
+  await panelEditPage.datasource.set(ds.name);
+  const row = panelEditPage.getQueryEditorRow('A');
+  await row.getByLabel('Query type').click();
+  await row.page().getByRole('option', { name: 'Count' }).click();
+  await row.getByRole('radio', { name: 'Builder' }).click({ force: true });
+  // "Group by" only applies to aggregate pipelines, not the bare filter document count/find/distinct compile to.
+  await expect(row.getByText('Group by')).not.toBeVisible();
+  await row.getByLabel('Collection').fill('metrics');
+  await row.getByRole('button', { name: 'Add filter' }).click();
+  await row.getByLabel('Filter field').fill('host');
+  await row.getByLabel('Filter value').fill('web-01');
+  await panelEditPage.setVisualization('Table');
+  await expect(panelEditPage.refreshPanel()).toBeOK();
+  await expect(panelEditPage.panel.fieldNames).toContainText(['count']);
+});
+
 test('explain shows a query plan for an aggregate query', async ({ panelEditPage, readProvisionedDataSource, selectors }) => {
   const ds = await readProvisionedDataSource({ fileName: 'datasources.yml' });
   await panelEditPage.datasource.set(ds.name);
