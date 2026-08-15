@@ -47,51 +47,6 @@ func TestDocsToFrameColumnOrderIsStable(t *testing.T) {
 	}
 }
 
-// TestDocsToStreamFrameKeepsSchemaStableAcrossCalls guards against the live
-// tailing bug where each streamed frame derived its schema independently:
-// a field present on one change-stream event but absent from the next
-// vanished from the frame entirely instead of coming through as null,
-// and consecutive frames on the same Grafana Live channel ended up with
-// different field sets/order. docsToStreamFrame's reused builder must keep
-// every field seen so far, in the order first seen, even when a later
-// document omits it.
-func TestDocsToStreamFrameKeepsSchemaStableAcrossCalls(t *testing.T) {
-	b := newFrameBuilder()
-
-	first := docsToStreamFrame(b, []bson.D{{
-		{Key: "level", Value: "error"},
-		{Key: "msg", Value: "boom"},
-		{Key: "stack", Value: "trace..."},
-	}}, "logs", "logs")
-	if got, want := fieldNames(first), []string{"level", "msg", "stack"}; !equalStrings(got, want) {
-		t.Fatalf("first frame fields = %v, want %v", got, want)
-	}
-
-	second := docsToStreamFrame(b, []bson.D{{
-		{Key: "level", Value: "info"},
-		{Key: "msg", Value: "ok"},
-	}}, "logs", "logs")
-	if got, want := fieldNames(second), []string{"level", "msg", "stack"}; !equalStrings(got, want) {
-		t.Fatalf("second frame fields = %v, want %v (stack must not vanish)", got, want)
-	}
-	stackField := second.Fields[2]
-	if stackField.Name != "stack" {
-		t.Fatalf("expected third field to be stack, got %v", stackField.Name)
-	}
-	if v := stackField.At(0); v != (*string)(nil) {
-		t.Errorf("stack value for a document missing that field = %v, want nil", v)
-	}
-
-	third := docsToStreamFrame(b, []bson.D{{
-		{Key: "level", Value: "warn"},
-		{Key: "msg", Value: "careful"},
-		{Key: "service", Value: "api"},
-	}}, "logs", "logs")
-	if got, want := fieldNames(third), []string{"level", "msg", "stack", "service"}; !equalStrings(got, want) {
-		t.Fatalf("third frame fields = %v, want %v", got, want)
-	}
-}
-
 // TestLogFieldMappingRenamesConfiguredColumns covers issue 18's "configurable
 // log field mapping": a collection that doesn't name its fields "message"/
 // "level" should still render in the logs visualization once the user maps

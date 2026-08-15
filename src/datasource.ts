@@ -1,5 +1,4 @@
-import { merge, Observable, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
 
 import {
   AnnotationQuery,
@@ -9,55 +8,11 @@ import {
   DataQueryResponse,
   DataSourceInstanceSettings,
   DataSourceVariableSupport,
-  LiveChannelScope,
-  LoadingState,
   ScopedVars,
 } from '@grafana/data';
-import { DataSourceWithBackend, getGrafanaLiveSrv, getTemplateSrv, toDataQueryError } from '@grafana/runtime';
+import { DataSourceWithBackend, getTemplateSrv } from '@grafana/runtime';
 
 import { DEFAULT_ANNOTATION_QUERY, DEFAULT_QUERY, MongoDataSourceOptions, MongoQuery } from './types';
-
-const isLiveTarget = (query: MongoQuery): boolean => query.format === 'logs' && !!query.liveStreaming;
-
-/** Grafana Live channel paths may only contain [A-z0-9_-/=.]; anything else makes the subscription
- * fail with "invalid channel ID". Never returns '' -- an empty segment (e.g. a query that relies on
- * the datasource-level default database and so leaves query.database unset) would otherwise produce
- * a path with an empty "//" segment. That doesn't fail outright: SubscribeStream still succeeds and
- * seeds the initial backlog, so the panel looks fine at first. But it breaks Grafana Live's
- * subscriber-presence tracking for the channel, which falsely reports zero subscribers ~20s in and
- * kills the backend RunStream tail -- the exact "subscription establishes but never visibly
- * refreshes" symptom in issue #37. */
-const sanitizeChannelSegment = (value: string): string => value.replace(/[^A-Za-z0-9_\-.]/g, '_') || '_';
-
-/** Cheap (non-cryptographic) hash so free-form filter text can distinguish live channels without
- * blowing past Grafana Live's 160-character channel ID limit or violating its character allowlist.
- *
- * Combines two independent 32-bit hashes (djb2 + sdbm) into a 64-bit digest. A single 32-bit hash
- * collides at a ~64k-input birthday bound, which is reachable in practice and would silently
- * cross-wire two panels' live subscriptions onto the same Grafana Live channel (see PR #29 review,
- * finding 7). 64 bits pushes that bound out to ~4 billion inputs. */
-const hashChannelSegment = (value: string): string => {
-  let djb2 = 5381;
-  let sdbm = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    djb2 = (djb2 * 33) ^ code;
-    sdbm = (code + (sdbm << 6) + (sdbm << 16) - sdbm) | 0;
-  }
-  return (djb2 >>> 0).toString(36) + (sdbm >>> 0).toString(36);
-};
-
-/** Distinguishing query params baked into the live channel path so editing the filter, collection or
- * database re-subscribes to a fresh channel instead of reusing a stale RunStream. */
-const liveChannelPath = (query: MongoQuery): string => {
-  const parts = [
-    sanitizeChannelSegment(query.refId),
-    sanitizeChannelSegment(query.database ?? ''),
-    sanitizeChannelSegment(query.collection ?? ''),
-    hashChannelSegment(query.queryText ?? ''),
-  ];
-  return `logs/${parts.join('/')}`;
-};
 
 /**
  * Lets dashboard variables be defined with the regular query editor; the
@@ -93,45 +48,12 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
     return DEFAULT_QUERY;
   }
 
-  /**
-   * Splits off "logs" format queries with live tailing enabled and streams
-   * them over Grafana Live (backed by the backend's RunStream, see
-   * pkg/plugin/stream.go), merging them with the regular one-shot response
-   * for the rest of the targets.
-   */
   query(request: DataQueryRequest<MongoQuery>): Observable<DataQueryResponse> {
     const targets = request.targets.filter((t) => !t.hide && this.filterQuery(t));
-    const liveTargets = targets.filter(isLiveTarget);
-    const normalTargets = targets.filter((t) => !isLiveTarget(t));
-
-    const responses: Array<Observable<DataQueryResponse>> = liveTargets.map((target) => {
-      const resolved = this.applyTemplateVariables(target, request.scopedVars);
-      return getGrafanaLiveSrv()
-        .getDataStream({
-          key: `${request.requestId}-${resolved.refId}`,
-          addr: {
-            scope: LiveChannelScope.DataSource,
-            stream: this.uid,
-            path: liveChannelPath(resolved),
-            data: resolved,
-          },
-        })
-        .pipe(
-          catchError((err) => {
-            // Native Error objects hold `message` as a non-enumerable own property, so it must be
-            // read explicitly rather than spread into the response's error object.
-            const error = toDataQueryError(err);
-            error.refId = resolved.refId;
-            return of({ data: [], state: LoadingState.Error, error });
-          })
-        );
-    });
-
-    if (normalTargets.length > 0) {
-      responses.push(super.query({ ...request, targets: normalTargets }));
+    if (targets.length === 0) {
+      return of({ data: [] });
     }
-
-    return responses.length > 0 ? merge(...responses) : of({ data: [] });
+    return super.query({ ...request, targets });
   }
 
   /** Lists databases visible to schema discovery. */

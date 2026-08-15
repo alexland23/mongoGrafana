@@ -7,7 +7,6 @@ import {
   ComboboxOption,
   InlineField,
   InlineFieldRow,
-  InlineSwitch,
   Input,
   Modal,
   RadioButtonGroup,
@@ -44,12 +43,6 @@ const EDITOR_LABEL: Record<QueryType, string> = {
 };
 
 const toOptions = (values: string[]): Array<ComboboxOption<string>> => values.map((v) => ({ label: v, value: v }));
-
-// Live tailing reuses parseDocument on the backend, which only understands a
-// plain filter document — not an aggregation pipeline ("aggregate") or an
-// arbitrary command document ("command").
-const isLiveEligible = (queryType: QueryType): boolean =>
-  queryType === 'find' || queryType === 'count' || queryType === 'distinct';
 
 // Explain reuses the backend's parseDocument/parsePipeline, which only understand a plain filter
 // document ("find") or an aggregation pipeline ("aggregate") -- not "count"/"distinct" (bare
@@ -207,7 +200,6 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: P
                 // otherwise; re-compile so the query type change doesn't leave queryText in the
                 // wrong shape for the new type.
                 queryText: nextEditorMode === 'builder' ? compileBuilderState(v.value, query.builder ?? DEFAULT_BUILDER_STATE) : query.queryText,
-                liveStreaming: isLiveEligible(v.value) ? query.liveStreaming : false,
               });
             }}
           />
@@ -251,24 +243,11 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: P
             value={query.format ?? 'table'}
             width={20}
             onChange={(v) => {
-              // Live tailing only makes sense for the logs visualization.
-              deferredOnChange({ ...query, format: v.value, liveStreaming: v.value === 'logs' ? query.liveStreaming : false });
+              deferredOnChange({ ...query, format: v.value });
               deferredRunQuery();
             }}
           />
         </InlineField>
-        {query.format === 'logs' && isLiveEligible(queryType) && (
-          <InlineField label="Live" labelWidth={8} tooltip="Tail the collection for new matching documents instead of running a one-shot query.">
-            <InlineSwitch
-              id="query-editor-live-streaming"
-              value={!!query.liveStreaming}
-              onChange={(e) => {
-                onChange({ ...query, liveStreaming: e.currentTarget.checked });
-                onRunQuery();
-              }}
-            />
-          </InlineField>
-        )}
         <InlineField label="Database" labelWidth={16} tooltip="Optional override of the datasource default database.">
           {discoveryEnabled ? (
             <Combobox

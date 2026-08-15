@@ -67,19 +67,6 @@ func (b *frameBuilder) addDocument(doc bson.D, maxDepth int) {
 	}
 }
 
-// resetRows clears a builder's accumulated rows while preserving its
-// established column schema (names, order, types). Reusing a builder across
-// streamed frames this way keeps the schema stable for the life of a live
-// channel instead of rederiving it from scratch per frame, so a field seen
-// on an earlier event but absent from the current one comes through as null
-// rather than vanishing from the frame.
-func (b *frameBuilder) resetRows() {
-	b.rows = 0
-	for _, col := range b.cols {
-		col.vals = col.vals[:0]
-	}
-}
-
 // coerce reconciles a value whose kind differs from the column's kind. A
 // number arriving in a column of the other numeric kind (int64/float64)
 // promotes the column to float64, since that's the only one of the two that
@@ -387,24 +374,6 @@ func docsToFrame(docs []bson.D, refID, format string) *data.Frame {
 // and derived fields, plus flatten-depth control, applied (see frameOptions).
 func docsToFrameWithLogOptions(docs []bson.D, refID, format string, opts frameOptions) *data.Frame {
 	return buildDocsFrame(newFrameBuilder(), docs, refID, format, opts)
-}
-
-// docsToStreamFrame is docsToFrame but built onto a builder the caller keeps
-// across calls, so the schema (field set/order/types) it establishes stays
-// stable across the many frames sent over a live channel's lifetime instead
-// of being rederived from scratch each call -- important for change-stream
-// events, which are typically converted one document at a time.
-func docsToStreamFrame(b *frameBuilder, docs []bson.D, refID, format string) *data.Frame {
-	b.resetRows()
-	return buildDocsFrame(b, docs, refID, format, frameOptions{})
-}
-
-// docsToStreamFrameWithLogOptions is docsToStreamFrame with logs-specific
-// field mapping and derived fields, plus flatten-depth control, applied (see
-// frameOptions).
-func docsToStreamFrameWithLogOptions(b *frameBuilder, docs []bson.D, refID, format string, opts frameOptions) *data.Frame {
-	b.resetRows()
-	return buildDocsFrame(b, docs, refID, format, opts)
 }
 
 func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string, opts frameOptions) *data.Frame {

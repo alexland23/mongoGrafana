@@ -57,12 +57,11 @@ A toggle between "Code" (current Monaco) and "Builder": pick collection → add 
 - Frontend: new `src/components/QueryBuilder/` components, extend `MongoQuery` in `src/types.ts` (keep raw + builder state, `editorMode` flag)
 - Backend: unchanged (still receives a pipeline)
 
-### 6. Live streaming for log tailing — done
-Implemented `StreamHandler` (`SubscribeStream`/`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling by `_id` for standalone deployments). A "Live" toggle on logs-format queries tails the selected collection in Explore, seeded with a recent backlog on subscribe. Added the `streaming: true` capability flag; `datasource.Manage` wires up the stream handlers automatically, no `pkg/main.go` change needed. **The `plugin.json` change requires restarting the Grafana server** — a running dev instance won't pick up the Live toggle until restarted.
+### 6. Live streaming for log tailing — removed
+Implemented `StreamHandler` (`SubscribeStream`/`RunStream`) using MongoDB **change streams** (replica-set/Atlas only, with graceful fallback to polling by `_id` for standalone deployments), with a "Live" toggle on logs-format queries. Removed (see #51) rather than continue debugging it: behavior stayed unreliable/confusing even after a fix attempt (#37), and Grafana's own dashboard "refresh query" already goes down to 5s, covering the same use case without a bespoke change-stream/polling pipeline to maintain. **The `plugin.json` change (dropping the `streaming: true` capability flag) requires restarting the Grafana server** to take effect.
 
-- Backend: new `pkg/plugin/stream.go` (reuses `queryModel`/`parseDocument`/`docsToFrame` from the regular query path)
-- Frontend: `src/datasource.ts` (`query()` override routes live "logs" targets through `getGrafanaLiveSrv().getDataStream`), `src/components/QueryEditor.tsx` (Live toggle), `src/types.ts`, `src/plugin.json`
-- Frontend: `src/datasource.ts` (channel support), `src/plugin.json`
+- Backend: deleted `pkg/plugin/stream.go` and its wiring in `pkg/plugin/datasource.go`
+- Frontend: removed live-channel routing from `src/datasource.ts`'s `query()`, the Live toggle from `src/components/QueryEditor.tsx`, `liveStreaming` from `src/types.ts`, and the `streaming` flag from `src/plugin.json`
 
 ### 7. TLS / advanced connection options in the config UI — done
 Added a "TLS / Security" fieldset (enable TLS, skip-verify toggle, CA cert / client cert / key as secure JSON textareas, each with an alternate "...or path" field so certs can be loaded from a file on the plugin backend host instead of pasted) and an "Advanced connection options" fieldset (read preference, connect timeout, max pool size) to the config editor. The backend builds a `tls.Config` by reading each cert from its path when set (falling back to the pasted content), and applies read preference / connect timeout / max pool size to the Mongo client options.

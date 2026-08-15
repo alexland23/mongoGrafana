@@ -1,11 +1,8 @@
-import { throwError } from 'rxjs';
-
-import { DataQueryRequest, DataSourceInstanceSettings, LoadingState, PluginType, ScopedVars } from '@grafana/data';
+import { DataSourceInstanceSettings, PluginType, ScopedVars } from '@grafana/data';
 
 import { DataSource } from './datasource';
 import { MongoDataSourceOptions, MongoQuery } from './types';
 
-const getDataStream = jest.fn();
 const replaceMock = jest.fn(
   (text: string, _scopedVars?: ScopedVars, _format?: (value: string | string[]) => string) => text
 );
@@ -14,7 +11,6 @@ jest.mock('@grafana/runtime', () => {
   const actual = jest.requireActual('@grafana/runtime');
   return {
     ...actual,
-    getGrafanaLiveSrv: () => ({ getDataStream }),
     getTemplateSrv: () => ({ replace: replaceMock }),
   };
 });
@@ -29,83 +25,6 @@ const instanceSettings: DataSourceInstanceSettings<MongoDataSourceOptions> = {
   access: 'proxy',
   readOnly: false,
 };
-
-const baseTarget: MongoQuery = {
-  refId: 'A',
-  queryType: 'find',
-  collection: 'logs',
-  format: 'logs',
-  liveStreaming: true,
-};
-
-const baseRequest: DataQueryRequest<MongoQuery> = {
-  requestId: 'req-1',
-  targets: [baseTarget],
-  scopedVars: {},
-} as DataQueryRequest<MongoQuery>;
-
-describe('DataSource live streaming', () => {
-  beforeEach(() => {
-    getDataStream.mockReset();
-  });
-
-  it('surfaces getDataStream failures as a populated DataQueryResponse error instead of an unhandled observable error', async () => {
-    getDataStream.mockReturnValue(throwError(() => new Error('subscribe failed: not found')));
-
-    const ds = new DataSource(instanceSettings);
-    const responses: Array<{ data: unknown[]; state?: LoadingState; error?: { message?: string; refId?: string } }> =
-      [];
-
-    await new Promise<void>((resolve, reject) => {
-      ds.query(baseRequest).subscribe({
-        next: (rsp) => responses.push(rsp),
-        error: reject,
-        complete: resolve,
-      });
-    });
-
-    expect(responses).toHaveLength(1);
-    expect(responses[0].state).toBe(LoadingState.Error);
-    expect(responses[0].error?.message).toContain('subscribe failed: not found');
-    expect(responses[0].error?.refId).toBe('A');
-  });
-
-  it('resolves distinct live channels for query texts that collide under a 32-bit hash', () => {
-    getDataStream.mockReturnValue(throwError(() => new Error('unused')));
-
-    // These two strings collide under the plain djb2 32-bit hash previously used for
-    // hashChannelSegment (both hash to "1ghqtjy"), demonstrating the ~64k-input birthday
-    // bound that made cross-wired live subscriptions (PR #29 review, finding 7) reachable
-    // in practice. The widened 64-bit digest must resolve them to different channels.
-    const queryA: MongoQuery = { ...baseTarget, queryText: '902662a29bf29504721fe991' };
-    const queryB: MongoQuery = { ...baseTarget, queryText: 'da191659f798e5ed2e216824' };
-
-    const ds = new DataSource(instanceSettings);
-    ds.query({ ...baseRequest, targets: [queryA] }).subscribe();
-    ds.query({ ...baseRequest, targets: [queryB] }).subscribe();
-
-    expect(getDataStream).toHaveBeenCalledTimes(2);
-    const pathA = getDataStream.mock.calls[0][0].addr.path;
-    const pathB = getDataStream.mock.calls[1][0].addr.path;
-    expect(pathA).not.toEqual(pathB);
-  });
-
-  it('never emits an empty channel path segment for a query that relies on the datasource default database', () => {
-    getDataStream.mockReturnValue(throwError(() => new Error('unused')));
-
-    // query.database is deliberately unset here, matching the common case of a query that relies on
-    // the datasource-level default database instead of overriding it per-query. Building the path
-    // from an empty segment (e.g. "logs/A//logs/<hash>") doesn't fail subscription outright, but
-    // breaks Grafana Live's subscriber-presence tracking and silently kills the tail ~20s in --
-    // reproduced live against the dev stack for issue #37.
-    const ds = new DataSource(instanceSettings);
-    ds.query({ ...baseRequest, targets: [baseTarget] }).subscribe();
-
-    expect(getDataStream).toHaveBeenCalledTimes(1);
-    const path: string = getDataStream.mock.calls[0][0].addr.path;
-    expect(path.split('/')).not.toContain('');
-  });
-});
 
 describe('DataSource.filterQuery', () => {
   const ds = new DataSource(instanceSettings);
