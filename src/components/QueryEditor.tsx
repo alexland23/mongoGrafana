@@ -393,7 +393,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         <InlineFieldRow>
           <InlineField
             label={EDITOR_LABEL[queryType]}
-            labelWidth={30}
+            labelWidth={34}
             grow
             tooltip="MongoDB extended JSON. Macros: $__timeFrom, $__timeTo, $__timeFrom_ms, $__timeTo_ms, $__interval_ms, $__maxDataPoints. Dashboard variables like $variable are supported. Press Cmd/Ctrl+S or blur the editor to run."
           >
