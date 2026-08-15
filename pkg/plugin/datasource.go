@@ -255,7 +255,7 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 	)
 	switch queryType {
 	case "aggregate":
-		docs, err = runAggregate(ctx, coll, text, guard, d.settings.MaxDocuments)
+		docs, err = runAggregate(ctx, coll, text, qm, guard, d.settings.MaxDocuments)
 	case "find":
 		docs, err = runFind(ctx, coll, text, qm, guard, d.settings.MaxDocuments)
 	case "count":
@@ -282,7 +282,7 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 	return response
 }
 
-func runAggregate(ctx context.Context, coll *mongo.Collection, text string, guard *operatorGuard, maxDocuments int64) ([]bson.D, error) {
+func runAggregate(ctx context.Context, coll *mongo.Collection, text string, qm queryModel, guard *operatorGuard, maxDocuments int64) ([]bson.D, error) {
 	pipeline, err := parsePipeline(text)
 	if err != nil {
 		return nil, err
@@ -290,7 +290,7 @@ func runAggregate(ctx context.Context, coll *mongo.Collection, text string, guar
 	if err := guard.checkPipeline(pipeline); err != nil {
 		return nil, err
 	}
-	pipeline = applyMaxDocumentsLimit(pipeline, maxDocuments)
+	pipeline = applyAggregatePaging(pipeline, qm.Skip, qm.Limit, maxDocuments)
 	cursor, err := coll.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err

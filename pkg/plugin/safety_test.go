@@ -94,9 +94,9 @@ func TestOperatorGuardExtraBlockedCommand(t *testing.T) {
 	}
 }
 
-func TestApplyMaxDocumentsLimitAppendsStage(t *testing.T) {
+func TestApplyAggregatePagingNoQueryLimitFallsBackToMaxDocuments(t *testing.T) {
 	pipeline := []bson.D{{{Key: "$match", Value: bson.D{}}}}
-	out := applyMaxDocumentsLimit(pipeline, 5000)
+	out := applyAggregatePaging(pipeline, 0, 0, 5000)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 stages, got %d", len(out))
 	}
@@ -105,11 +105,36 @@ func TestApplyMaxDocumentsLimitAppendsStage(t *testing.T) {
 	}
 }
 
-func TestApplyMaxDocumentsLimitDisabledLeavesPipelineUnchanged(t *testing.T) {
+func TestApplyAggregatePagingDisabledLeavesPipelineUnchanged(t *testing.T) {
 	pipeline := []bson.D{{{Key: "$match", Value: bson.D{}}}}
-	out := applyMaxDocumentsLimit(pipeline, -1)
+	out := applyAggregatePaging(pipeline, 0, 0, -1)
 	if len(out) != 1 {
 		t.Fatalf("expected pipeline unchanged, got %d stages", len(out))
+	}
+}
+
+func TestApplyAggregatePagingAppendsSkipAndLimit(t *testing.T) {
+	pipeline := []bson.D{{{Key: "$match", Value: bson.D{}}}}
+	out := applyAggregatePaging(pipeline, 20, 10, 5000)
+	if len(out) != 3 {
+		t.Fatalf("expected 3 stages, got %+v", out)
+	}
+	if out[1][0].Key != "$skip" || out[1][0].Value != int64(20) {
+		t.Errorf("expected $skip stage of 20, got %+v", out[1])
+	}
+	if out[2][0].Key != "$limit" || out[2][0].Value != int64(10) {
+		t.Errorf("expected $limit stage of 10, got %+v", out[2])
+	}
+}
+
+func TestApplyAggregatePagingQueryLimitClampedByMaxDocuments(t *testing.T) {
+	pipeline := []bson.D{{{Key: "$match", Value: bson.D{}}}}
+	out := applyAggregatePaging(pipeline, 0, 50000, 5000)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 stages, got %+v", out)
+	}
+	if out[1][0].Key != "$limit" || out[1][0].Value != int64(5000) {
+		t.Errorf("expected $limit stage clamped to 5000, got %+v", out[1])
 	}
 }
 

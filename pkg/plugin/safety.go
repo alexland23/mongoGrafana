@@ -88,17 +88,23 @@ func (g *operatorGuard) checkValue(v any) error {
 	return nil
 }
 
-// applyMaxDocumentsLimit appends a trailing $limit stage to an aggregation
-// pipeline when maxDocuments is positive, so a careless match-only pipeline
-// gets bounded instead of materializing the whole collection. Any stage
-// already limiting below maxDocuments stays authoritative -- the appended
-// stage is a cap, not an override. maxDocuments <= 0 leaves the pipeline
-// unchanged (the guard is disabled).
-func applyMaxDocumentsLimit(pipeline []bson.D, maxDocuments int64) []bson.D {
-	if maxDocuments <= 0 {
-		return pipeline
+// applyAggregatePaging appends user-configured $skip/$limit stages to an
+// aggregation pipeline, mirroring runFind's skip/limit handling: a positive
+// skip becomes a trailing $skip stage, and the effective limit -- the
+// query's own limit combined with the datasource's maxDocuments guard via
+// resolveFindLimit -- becomes a trailing $limit stage. This is also what
+// bounds a careless match-only pipeline when the query sets no limit of its
+// own: resolveFindLimit falls back to maxDocuments. skip <= 0 appends no
+// $skip stage; an effective limit <= 0 (both the query limit and the
+// maxDocuments guard disabled) appends no $limit stage.
+func applyAggregatePaging(pipeline []bson.D, skip, limit, maxDocuments int64) []bson.D {
+	if skip > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$skip", Value: skip}})
 	}
-	return append(pipeline, bson.D{{Key: "$limit", Value: maxDocuments}})
+	if effLimit := resolveFindLimit(limit, maxDocuments); effLimit > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$limit", Value: effLimit}})
+	}
+	return pipeline
 }
 
 // resolveFindLimit combines a query's own "find" limit with the datasource's

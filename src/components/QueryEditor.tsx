@@ -60,15 +60,31 @@ const isExplainEligible = (queryType: QueryType): boolean => queryType === 'aggr
 // ("find"/"count"/"distinct"); "command" takes an arbitrary command document Builder can't produce.
 const isBuilderEligible = (queryType: QueryType): boolean => queryType !== 'command';
 
+// Only "find" and "aggregate" have a skip/limit concept: runFind sets them as cursor options,
+// and runAggregate appends them as trailing $skip/$limit pipeline stages (pkg/plugin/safety.go's
+// applyAggregatePaging). "count"/"distinct"/"command" don't return a page-able result set.
+const isPagingEligible = (queryType: QueryType): boolean => queryType === 'find' || queryType === 'aggregate';
+
 const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
   { label: 'Code', value: 'code' },
   { label: 'Builder', value: 'builder' },
 ];
 
-export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) {
+export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: Props) {
   const queryType = query.queryType ?? 'find';
   const editorMode = query.editorMode ?? 'code';
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
+
+  // Row count of this query's own result, used to disable "Next page" once the last page came back
+  // shorter than the configured limit (i.e. there's nothing left to page into).
+  const lastResultRowCount = data?.series.find((frame) => frame.refId === query.refId)?.length;
+  const pageSize = query.limit ?? 0;
+  const pageSkip = query.skip ?? 0;
+  const onPageChange = (direction: 1 | -1) => {
+    const nextSkip = Math.max(0, pageSkip + direction * pageSize);
+    onChange({ ...query, skip: nextSkip || undefined });
+    onRunQuery();
+  };
 
   const onEditorModeChange = (mode: EditorMode) => {
     onChange({ ...query, editorMode: mode });
@@ -354,29 +370,39 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         </InlineFieldRow>
       )}
 
-      {queryType === 'find' && (
+      {isPagingEligible(queryType) && (
         <InlineFieldRow>
-          <InlineField label="Projection" labelWidth={14} tooltip='e.g. {"name": 1, "_id": 0}'>
-            <Input
-              id="query-editor-projection"
-              value={query.projection || ''}
-              placeholder="{}"
-              width={26}
-              onChange={onTextInput('projection')}
-              onBlur={onRunQuery}
-            />
-          </InlineField>
-          <InlineField label="Sort" labelWidth={8} tooltip='e.g. {"time": 1}'>
-            <Input
-              id="query-editor-sort"
-              value={query.sort || ''}
-              placeholder="{}"
-              width={22}
-              onChange={onTextInput('sort')}
-              onBlur={onRunQuery}
-            />
-          </InlineField>
-          <InlineField label="Limit" labelWidth={8}>
+          {queryType === 'find' && (
+            <>
+              <InlineField label="Projection" labelWidth={14} tooltip='e.g. {"name": 1, "_id": 0}'>
+                <Input
+                  id="query-editor-projection"
+                  value={query.projection || ''}
+                  placeholder="{}"
+                  width={26}
+                  onChange={onTextInput('projection')}
+                  onBlur={onRunQuery}
+                />
+              </InlineField>
+              <InlineField label="Sort" labelWidth={8} tooltip='e.g. {"time": 1}'>
+                <Input
+                  id="query-editor-sort"
+                  value={query.sort || ''}
+                  placeholder="{}"
+                  width={22}
+                  onChange={onTextInput('sort')}
+                  onBlur={onRunQuery}
+                />
+              </InlineField>
+            </>
+          )}
+          <InlineField
+            label="Limit"
+            labelWidth={8}
+            tooltip={
+              queryType === 'aggregate' ? 'Documents to return, appended as a trailing $limit stage.' : undefined
+            }
+          >
             <Input
               id="query-editor-limit"
               type="number"
@@ -387,7 +413,15 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
               onBlur={onRunQuery}
             />
           </InlineField>
-          <InlineField label="Skip" labelWidth={8}>
+          <InlineField
+            label="Skip"
+            labelWidth={8}
+            tooltip={
+              queryType === 'aggregate'
+                ? 'Documents to skip, appended as a leading $skip stage before the limit.'
+                : undefined
+            }
+          >
             <Input
               id="query-editor-skip"
               type="number"
@@ -397,6 +431,28 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
               onChange={onNumberInput('skip')}
               onBlur={onRunQuery}
             />
+          </InlineField>
+          <InlineField label="Page" labelWidth={6} tooltip="Step skip backward/forward by the current limit.">
+            <>
+              <Button
+                id="query-editor-prev-page"
+                icon="angle-left"
+                variant="secondary"
+                size="md"
+                disabled={!pageSize || pageSkip <= 0}
+                tooltip="Previous page"
+                onClick={() => onPageChange(-1)}
+              />
+              <Button
+                id="query-editor-next-page"
+                icon="angle-right"
+                variant="secondary"
+                size="md"
+                disabled={!pageSize || (lastResultRowCount !== undefined && lastResultRowCount < pageSize)}
+                tooltip="Next page"
+                onClick={() => onPageChange(1)}
+              />
+            </>
           </InlineField>
         </InlineFieldRow>
       )}
