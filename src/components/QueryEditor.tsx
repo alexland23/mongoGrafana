@@ -85,7 +85,15 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: P
   };
 
   const onEditorModeChange = (mode: EditorMode) => {
-    onChange({ ...query, editorMode: mode });
+    onChange({
+      ...query,
+      editorMode: mode,
+      // Switching into Builder mode must recompile queryText from the current builder state,
+      // otherwise the "Compiled filter/pipeline" preview panel keeps showing whatever was last
+      // typed in Code mode (or a prior compile), disagreeing with the Builder fields it's meant
+      // to reflect until a Builder control is touched.
+      queryText: mode === 'builder' ? compileBuilderState(queryType, query.builder ?? DEFAULT_BUILDER_STATE) : query.queryText,
+    });
     onRunQuery();
   };
 
