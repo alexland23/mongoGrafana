@@ -3,7 +3,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { createDataFrame, getDefaultTimeRange, LoadingState, PanelData } from '@grafana/data';
 import { QueryEditor } from './QueryEditor';
 import { DataSource } from '../datasource';
-import { MongoQuery } from '../types';
+import { DEFAULT_BUILDER_STATE, MongoQuery } from '../types';
+import { compileBuilderState } from './QueryBuilder/compile';
 
 // CodeEditor (Monaco) isn't under test here and its real "monaco-editor" package pulls in web
 // worker / AMD loader machinery jsdom can't run; stub both out so the rest of the query editor
@@ -126,5 +127,38 @@ describe('QueryEditor next/previous page controls', () => {
     renderEditor({ ...baseQuery, queryType: 'aggregate', limit: 10, skip: 0 }, data);
 
     expectAriaDisabled(screen.getByLabelText('Next page'), false);
+  });
+});
+
+describe('QueryEditor editor mode toggle', () => {
+  it('recompiles queryText from builder state when switching Code -> Builder', () => {
+    const builder = { ...DEFAULT_BUILDER_STATE, filters: [{ field: 'status', operator: 'eq' as const, value: 'active' }] };
+    const { onChange } = renderEditor({
+      ...baseQuery,
+      editorMode: 'code',
+      builder,
+      // Stale text left over from editing in Code mode -- disagrees with `builder` above.
+      queryText: '{"status": "inactive"}',
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Builder' }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ editorMode: 'builder', queryText: compileBuilderState('find', builder) })
+    );
+  });
+
+  it('leaves queryText untouched when switching Builder -> Code', () => {
+    const { onChange } = renderEditor({
+      ...baseQuery,
+      editorMode: 'builder',
+      queryText: '{"status": "active"}',
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Code' }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ editorMode: 'code', queryText: '{"status": "active"}' })
+    );
   });
 });
