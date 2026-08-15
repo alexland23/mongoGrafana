@@ -437,7 +437,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: P
               onBlur={onRunQuery}
             />
           </InlineField>
-          <InlineField label="Page" labelWidth={6} tooltip="Step skip backward/forward by the current limit.">
+          <InlineField label="Page" labelWidth={8} tooltip="Step skip backward/forward by the current limit.">
             <>
               <Button
                 id="query-editor-prev-page"
