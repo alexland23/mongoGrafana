@@ -116,6 +116,17 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   // next tick lets the selection settle first.
   const deferredRunQuery = () => setTimeout(onRunQuery, 0);
 
+  // Some selections here (query type, format) add or remove whole
+  // InlineFieldRows -- e.g. switching off "find" drops the Projection/Sort/
+  // Limit/Skip row, switching to "logs" adds the Message/Level row. Applying
+  // that layout change synchronously, inside the Combobox's own
+  // onSelectedItemChange, races with the popover's closing transition and
+  // its floating-ui reference tracking, which in Explore's query-row host
+  // manifests as a runaway re-render loop (React error #185). Deferring the
+  // query update to the next tick -- same trick as deferredRunQuery above --
+  // lets the popover finish closing first.
+  const deferredOnChange = (next: MongoQuery) => setTimeout(() => onChange(next), 0);
+
   // Combobox re-fetches whenever the async `options` function it's given
   // changes identity, so these must stay referentially stable across
   // renders (an unstable reference can otherwise feed back into a render
@@ -167,7 +178,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
               // "command" has no Builder support; leaving it for a builder-eligible type is fine
               // as-is, but moving *to* it while in Builder mode must drop back to Code.
               const nextEditorMode = isBuilderEligible(v.value) ? editorMode : 'code';
-              onChange({
+              deferredOnChange({
                 ...query,
                 queryType: v.value,
                 editorMode: nextEditorMode,
@@ -220,8 +231,8 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
             width={20}
             onChange={(v) => {
               // Live tailing only makes sense for the logs visualization.
-              onChange({ ...query, format: v.value, liveStreaming: v.value === 'logs' ? query.liveStreaming : false });
-              onRunQuery();
+              deferredOnChange({ ...query, format: v.value, liveStreaming: v.value === 'logs' ? query.liveStreaming : false });
+              deferredRunQuery();
             }}
           />
         </InlineField>
