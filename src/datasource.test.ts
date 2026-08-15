@@ -89,6 +89,22 @@ describe('DataSource live streaming', () => {
     const pathB = getDataStream.mock.calls[1][0].addr.path;
     expect(pathA).not.toEqual(pathB);
   });
+
+  it('never emits an empty channel path segment for a query that relies on the datasource default database', () => {
+    getDataStream.mockReturnValue(throwError(() => new Error('unused')));
+
+    // query.database is deliberately unset here, matching the common case of a query that relies on
+    // the datasource-level default database instead of overriding it per-query. Building the path
+    // from an empty segment (e.g. "logs/A//logs/<hash>") doesn't fail subscription outright, but
+    // breaks Grafana Live's subscriber-presence tracking and silently kills the tail ~20s in --
+    // reproduced live against the dev stack for issue #37.
+    const ds = new DataSource(instanceSettings);
+    ds.query({ ...baseRequest, targets: [baseTarget] }).subscribe();
+
+    expect(getDataStream).toHaveBeenCalledTimes(1);
+    const path: string = getDataStream.mock.calls[0][0].addr.path;
+    expect(path.split('/')).not.toContain('');
+  });
 });
 
 describe('DataSource.filterQuery', () => {

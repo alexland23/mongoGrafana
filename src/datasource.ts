@@ -20,8 +20,14 @@ import { DEFAULT_ANNOTATION_QUERY, DEFAULT_QUERY, MongoDataSourceOptions, MongoQ
 const isLiveTarget = (query: MongoQuery): boolean => query.format === 'logs' && !!query.liveStreaming;
 
 /** Grafana Live channel paths may only contain [A-z0-9_-/=.]; anything else makes the subscription
- * fail with "invalid channel ID". */
-const sanitizeChannelSegment = (value: string): string => value.replace(/[^A-Za-z0-9_\-.]/g, '_');
+ * fail with "invalid channel ID". Never returns '' -- an empty segment (e.g. a query that relies on
+ * the datasource-level default database and so leaves query.database unset) would otherwise produce
+ * a path with an empty "//" segment. That doesn't fail outright: SubscribeStream still succeeds and
+ * seeds the initial backlog, so the panel looks fine at first. But it breaks Grafana Live's
+ * subscriber-presence tracking for the channel, which falsely reports zero subscribers ~20s in and
+ * kills the backend RunStream tail -- the exact "subscription establishes but never visibly
+ * refreshes" symptom in issue #37. */
+const sanitizeChannelSegment = (value: string): string => value.replace(/[^A-Za-z0-9_\-.]/g, '_') || '_';
 
 /** Cheap (non-cryptographic) hash so free-form filter text can distinguish live channels without
  * blowing past Grafana Live's 160-character channel ID limit or violating its character allowlist.
