@@ -1,5 +1,9 @@
 # MongoDB data source plugin for Grafana
 
+[![CI](https://github.com/alexland23/mongoGrafana/actions/workflows/ci.yml/badge.svg)](https://github.com/alexland23/mongoGrafana/actions/workflows/ci.yml)
+[![Lint](https://github.com/alexland23/mongoGrafana/actions/workflows/lint.yml/badge.svg)](https://github.com/alexland23/mongoGrafana/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/alexland23/mongoGrafana/graph/badge.svg)](https://codecov.io/gh/alexland23/mongoGrafana)
+
 > **Note:** This is an unofficial, community-built plugin. It is not developed, maintained, or endorsed by MongoDB, Inc. or Grafana Labs.
 
 A Grafana data source plugin (plugin ID `alandave-mongodb-datasource`) for querying and visualizing MongoDB data. It has a Go backend built on the official MongoDB driver (v2) and a React frontend with a Monaco JSON query editor.
