@@ -61,7 +61,7 @@ const EDITOR_MODES: Array<SelectableValue<EditorMode>> = [
 ];
 
 export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) {
-  const queryType = query.queryType ?? 'aggregate';
+  const queryType = query.queryType ?? 'find';
   const editorMode = query.editorMode ?? 'code';
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
 
