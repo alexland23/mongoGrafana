@@ -79,3 +79,26 @@ test('explain shows a query plan for an aggregate query', async ({ panelEditPage
   await expect(row.page().getByRole('dialog', { name: 'Query plan' })).toBeVisible();
   await expect(row.page().getByText('"queryPlanner"')).toBeVisible();
 });
+
+// Regression test for https://github.com/alexland23/mongoGrafana/issues/46 -- switching to a
+// query type or format that drops/adds a whole InlineFieldRow used to crash Explore with React
+// error #185 (infinite update loop) because the resulting layout shift raced with the "Query
+// type"/"Format" Combobox's own closing transition. Only reproduced in Explore, not panel edit,
+// so this needs explorePage rather than panelEditPage.
+test('switching query type in Explore does not crash the page', async ({ explorePage, readProvisionedDataSource }) => {
+  const ds = await readProvisionedDataSource({ fileName: 'datasources.yml' });
+  await explorePage.goto();
+  await explorePage.datasource.set(ds.name);
+  const row = explorePage.getQueryEditorRow('A');
+
+  await row.getByLabel('Query type').click();
+  await row.page().getByRole('option', { name: 'Distinct' }).click();
+  await expect(row.getByLabel('Field')).toBeVisible();
+
+  await row.getByLabel('Query type').click();
+  await row.page().getByRole('option', { name: 'Command' }).click();
+  await expect(row.getByText('Command document (extended JSON)')).toBeVisible();
+  await expect(row.getByLabel('Collection')).not.toBeVisible();
+
+  await expect(row.page().getByText('An unexpected error happened')).not.toBeVisible();
+});
