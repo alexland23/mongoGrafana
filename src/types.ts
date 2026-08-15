@@ -108,12 +108,9 @@ export interface MongoQuery extends DataQuery {
 }
 
 export const DEFAULT_QUERY: Partial<MongoQuery> = {
-  queryType: 'aggregate',
+  queryType: 'find',
   format: 'table',
-  queryText: `[
-  { "$match": { } },
-  { "$limit": 100 }
-]`,
+  queryText: '{}',
 };
 
 /** Pre-fills new annotation queries with an example matching the "Annotations" column contract (see src/README.md). */
