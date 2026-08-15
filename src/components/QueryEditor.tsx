@@ -75,9 +75,14 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource, data }: P
   const editorMode = query.editorMode ?? 'code';
   const discoveryEnabled = datasource.schemaDiscoveryEnabled;
 
-  // Row count of this query's own result, used to disable "Next page" once the last page came back
-  // shorter than the configured limit (i.e. there's nothing left to page into).
-  const lastResultRowCount = data?.series.find((frame) => frame.refId === query.refId)?.length;
+  // Document count of this query's own result, used to disable "Next page" once the last page
+  // came back shorter than the configured limit (i.e. there's nothing left to page into). Read
+  // from frame.meta.custom.documentCount (set by the backend's buildDocsFrame) rather than the
+  // frame's row count directly: for format="timeseries" LongToWide pivots same-timestamp rows
+  // from multiple series into a single row, so the frame's row count can undercount documents.
+  const lastResultFrame = data?.series.find((frame) => frame.refId === query.refId);
+  const lastResultRowCount: number | undefined =
+    (lastResultFrame?.meta?.custom?.documentCount as number | undefined) ?? lastResultFrame?.length;
   const pageSize = query.limit ?? 0;
   const pageSkip = query.skip ?? 0;
   const onPageChange = (direction: 1 | -1) => {

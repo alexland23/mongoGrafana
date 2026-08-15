@@ -413,23 +413,35 @@ func buildDocsFrame(b *frameBuilder, docs []bson.D, refID, format string, opts f
 	}
 	frame := b.buildFrame(refID)
 
+	var out *data.Frame
 	switch format {
 	case "timeseries":
-		return toTimeSeries(frame)
+		out = toTimeSeries(frame)
 	case "long":
 		sortFrameByTime(frame)
 		frame.Meta = &data.FrameMeta{Type: data.FrameTypeTimeSeriesLong}
-		return frame
+		out = frame
 	case "logs":
 		renameField(frame, opts.messageField, "message")
 		renameField(frame, opts.levelField, "level")
 		applyDerivedFields(frame, opts.derivedFields)
 		frame.Meta = &data.FrameMeta{PreferredVisualization: data.VisTypeLogs}
-		return frame
+		out = frame
 	default:
 		frame.Meta = &data.FrameMeta{PreferredVisualization: data.VisTypeTable}
-		return frame
+		out = frame
 	}
+
+	// documentCount records how many documents Mongo actually returned, which
+	// "timeseries" format can diverge from once LongToWide pivots same-timestamp
+	// rows into one row per timestamp -- callers paging on result size (e.g. the
+	// QueryEditor's Next-page button) need the pre-pivot count to know whether a
+	// full page came back.
+	if out.Meta == nil {
+		out.Meta = &data.FrameMeta{}
+	}
+	out.Meta.Custom = map[string]int{"documentCount": len(docs)}
+	return out
 }
 
 // renameField points the logs visualization at a differently-named document

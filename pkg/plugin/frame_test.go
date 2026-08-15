@@ -323,6 +323,38 @@ func TestDocsToFrameLongFormatSkipsWideConversion(t *testing.T) {
 	}
 }
 
+// TestDocsToFrameTimeSeriesDocumentCountSurvivesPivot guards against a bug
+// where callers paging on frame row count (e.g. the QueryEditor's Next-page
+// button) would see fewer rows than documents once LongToWide pivots
+// same-timestamp rows from multiple series into a single row. The frame's
+// meta.Custom.documentCount must report the original, pre-pivot document
+// count regardless of how many rows the wide frame ends up with.
+func TestDocsToFrameTimeSeriesDocumentCountSurvivesPivot(t *testing.T) {
+	base := time.UnixMilli(1700000000000).UTC()
+	docs := []bson.D{
+		{{Key: "time", Value: bson.NewDateTimeFromTime(base)}, {Key: "host", Value: "a"}, {Key: "value", Value: 1.0}},
+		{{Key: "time", Value: bson.NewDateTimeFromTime(base)}, {Key: "host", Value: "b"}, {Key: "value", Value: 2.0}},
+		{{Key: "time", Value: bson.NewDateTimeFromTime(base.Add(time.Minute))}, {Key: "host", Value: "a"}, {Key: "value", Value: 3.0}},
+		{{Key: "time", Value: bson.NewDateTimeFromTime(base.Add(time.Minute))}, {Key: "host", Value: "b"}, {Key: "value", Value: 4.0}},
+	}
+
+	frame := docsToFrame(docs, "A", "timeseries")
+
+	if frame.Rows() >= len(docs) {
+		t.Fatalf("test setup invalid: expected LongToWide to pivot rows below the document count, got %d rows for %d docs", frame.Rows(), len(docs))
+	}
+	if frame.Meta == nil || frame.Meta.Custom == nil {
+		t.Fatalf("frame.Meta.Custom = %#v, want documentCount set", frame.Meta)
+	}
+	custom, ok := frame.Meta.Custom.(map[string]int)
+	if !ok {
+		t.Fatalf("frame.Meta.Custom = %#v (%T), want map[string]int", frame.Meta.Custom, frame.Meta.Custom)
+	}
+	if got, want := custom["documentCount"], len(docs); got != want {
+		t.Errorf("documentCount = %d, want %d (row count was %d)", got, want, frame.Rows())
+	}
+}
+
 func mustCompile(pattern string) *regexp.Regexp {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
