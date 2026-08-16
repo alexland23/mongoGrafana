@@ -76,7 +76,10 @@ test('explain shows a query plan for an aggregate query', async ({ panelEditPage
   const editor = panelEditPage.getByGrafanaSelector(selectors.components.CodeEditor.container);
   await setPipelineText(editor, '[{"$match": {}}]');
   await row.getByRole('button', { name: 'Explain' }).click();
-  await expect(row.page().getByRole('dialog', { name: 'Query plan' })).toBeVisible();
+  // Match the rendered title text rather than getByRole('dialog', { name }) -- the accessible
+  // name is computed from Grafana core's own Modal (aria-labelledby wiring), which has changed
+  // across Grafana versions and isn't something this plugin controls.
+  await expect(row.page().getByRole('dialog').getByText('Query plan', { exact: true })).toBeVisible();
   await expect(row.page().getByText('"queryPlanner"')).toBeVisible();
 });
 

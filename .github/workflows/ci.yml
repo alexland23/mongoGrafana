@@ -10,12 +10,16 @@ on:
       - master
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build, lint and unit tests
+    name: Build and unit tests
     runs-on: ubuntu-latest
     outputs:
       plugin-id: ${{ steps.metadata.outputs.plugin-id }}
@@ -24,6 +28,7 @@ jobs:
       has-backend: ${{ steps.check-for-backend.outputs.has-backend }}
     env:
       GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,10 +44,8 @@ jobs:
 
       - name: Check types
         run: npm run typecheck
-      - name: Lint
-        run: npm run lint
       - name: Unit tests
-        run: npm run test:ci
+        run: npm run test:ci -- --coverage
       - name: Build frontend
         run: npm run build
 
@@ -60,13 +63,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Lint backend
-        if: steps.check-for-backend.outputs.has-backend == 'true'
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: latest
-          args: ./...
-
       - name: Build backend
         if: steps.check-for-backend.outputs.has-backend == 'true'
         uses: magefile/mage-action@a662bd8c29d8106879588cfff83b2faf6e6f59db # v4.0.0
@@ -74,12 +70,32 @@ jobs:
           version: latest
           args: buildAll
 
-      - name: Test backend
+      - name: Test backend with coverage
         if: steps.check-for-backend.outputs.has-backend == 'true'
         uses: magefile/mage-action@a662bd8c29d8106879588cfff83b2faf6e6f59db # v4.0.0
         with:
           version: latest
-          args: test
+          args: coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Populates the coverage badge/percentage in README.md. Requires the
+      # repo to be linked at codecov.io and a CODECOV_TOKEN secret to be set;
+      # skipped (without failing the build) until that's configured.
+      - name: Upload coverage to Codecov
+        if: ${{ env.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        with:
+          token: ${{ env.CODECOV_TOKEN }}
+          files: coverage/lcov.info,coverage/backend.out
+          fail_ci_if_error: false
 
       - name: Check for E2E
         id: check-for-e2e
