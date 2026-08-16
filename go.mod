@@ -3,7 +3,7 @@ module github.com/alandave/mongo-db
 go 1.26.5
 
 require (
-	github.com/grafana/grafana-plugin-sdk-go v0.296.1
+	github.com/grafana/grafana-plugin-sdk-go v0.296.2
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 )
