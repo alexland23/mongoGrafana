@@ -35,3 +35,7 @@ See `FEATURE-IDEAS.md` for the current improvement roadmap.
 ### Scratch notes
 
 `notes/` is a gitignored scratch space for `.md` files (checklists, PR review notes, etc.) — save files there when the user asks you to save off notes, since they're not meant to be committed.
+
+### Git conventions
+
+Never include a Claude Code session URL (`https://claude.ai/code/session_...`) in commit messages or PR descriptions in this repo — not as a `Claude-Session:` trailer, not anywhere in the body. `Co-Authored-By` trailers are fine to keep.
