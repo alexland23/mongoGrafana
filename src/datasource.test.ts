@@ -57,9 +57,10 @@ describe('DataSource.filterQuery', () => {
     expect(ds.filterQuery({ refId: 'A', queryType: 'count', collection: 'logs', queryText: '' })).toBe(true);
   });
 
-  it('defaults to aggregate semantics when queryType is unset', () => {
-    expect(ds.filterQuery({ refId: 'A', collection: 'logs', queryText: '' })).toBe(false);
-    expect(ds.filterQuery({ refId: 'A', collection: 'logs', queryText: '[]' })).toBe(true);
+  it('defaults to find semantics when queryType is unset', () => {
+    expect(ds.filterQuery({ refId: 'A', collection: 'logs', queryText: '' })).toBe(true);
+    expect(ds.filterQuery({ refId: 'A', collection: 'logs' })).toBe(true);
+    expect(ds.filterQuery({ refId: 'A', queryText: '' })).toBe(false);
   });
 });
 
