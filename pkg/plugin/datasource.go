@@ -217,7 +217,11 @@ func (d *Datasource) query(ctx context.Context, query backend.DataQuery) backend
 
 	queryType := qm.QueryType
 	if queryType == "" {
-		queryType = "aggregate"
+		// Matches the frontend's default (types.ts DEFAULT_QUERY, QueryEditor's own fallback,
+		// and handleExplain's "find", "" case below) -- a query row whose queryType was never
+		// explicitly set should behave like "find" with an empty filter, not "aggregate" with
+		// an empty pipeline (which errors immediately).
+		queryType = "find"
 	}
 	if qm.Collection == "" && queryType != "command" {
 		return backend.ErrDataResponse(backend.StatusBadRequest, "collection is required")

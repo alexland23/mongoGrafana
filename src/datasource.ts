@@ -78,7 +78,9 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
    */
   explainQuery(query: MongoQuery): Promise<Record<string, unknown>> {
     return this.postResource<Record<string, unknown>>('explain', {
-      queryType: query.queryType ?? 'aggregate',
+      // Matches DEFAULT_QUERY and filterQuery's default below -- a query row whose queryType was
+      // never explicitly set behaves like "find", not "aggregate".
+      queryType: query.queryType ?? 'find',
       database: query.database,
       collection: query.collection,
       queryText: query.queryText,
@@ -101,7 +103,12 @@ export class DataSource extends DataSourceWithBackend<MongoQuery, MongoDataSourc
   }
 
   filterQuery(query: MongoQuery): boolean {
-    const queryType = query.queryType ?? 'aggregate';
+    // Matches DEFAULT_QUERY and the backend's default (pkg/plugin/datasource.go) -- a query row
+    // whose queryType was never explicitly set (e.g. a panel created without going through
+    // getDefaultQuery) behaves like "find" with an empty filter, not "aggregate" with an empty
+    // pipeline. Sending that as "aggregate" fails immediately: an empty filter document becomes a
+    // one-stage pipeline with zero operator fields, which MongoDB rejects outright.
+    const queryType = query.queryType ?? 'find';
     if (queryType === 'command') {
       return !!query.queryText;
     }
